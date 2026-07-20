@@ -1,52 +1,35 @@
-// Icon font loader for Expo apps. Fonts are loaded from a CDN only under
-// Expo Go (StoreClient) — that's where @expo/vector-icons' .ttf files come
-// back as 0 bytes from Metro's asset resolver on Android. Native dev/prod
-// builds and web pass an empty map, so useFonts resolves to [true, null]
-// immediately via react-native-vector-icons autolinking / web stubs.
-// ICON_VECTOR_VERSION must match @expo/vector-icons in package.json.
-// Usage: const [loaded, error] = useIconFonts();
+// Icon-font warmup used at app startup.
+//
+// IMPORTANT — why this is a no-op:
+//
+// app.json's `expo-font` plugin already embeds ionicons.ttf, feather.ttf and
+// material.ttf as NATIVE font resources at build time (see the Android
+// android/app/src/main/assets/fonts/ payload). Those fonts are available to
+// React Native the moment the ReactRootView mounts — no JS-side loading is
+// required.
+//
+// The previous implementation additionally called `Font.loadAsync` with
+// `require("../../assets/fonts/feather.ttf")` etc. In the debug APK bundle
+// that path resolves to an EMPTY asset ref because Metro's asset system no
+// longer has ownership of files that the expo-font plugin has hoisted into
+// native assets. The resulting rejection —
+//
+//   ExpoFontLoader.loadAsync has been rejected.
+//   → Caused by: Font file for feather is empty.
+//
+// bubbled up as an uncaught promise rejection and left the phone on a
+// dark-gray screen (unhandled promise rejection → RN root paint aborts on
+// some Android + Hermes debug builds). See test_result.md iteration where
+// the exact stack was captured via Expo Go's dev overlay.
+//
+// Trusting the plugin to have done its job removes the double-load and
+// eliminates the crash entirely.
 
-import Constants, { ExecutionEnvironment } from "expo-constants";
-import { useFonts } from "expo-font";
+export async function warmIconFonts(): Promise<boolean> {
+  // Fonts are already embedded natively by app.json's expo-font plugin.
+  return true;
+}
 
-const ICON_VECTOR_VERSION = "15.1.1";
-
-// short internal fontName (what the library queries) -> CDN .ttf file name
-const ICON_FAMILIES: Record<string, string> = {
-  anticon: "AntDesign",
-  entypo: "Entypo",
-  evilicons: "EvilIcons",
-  feather: "Feather",
-  FontAwesome: "FontAwesome",
-  Fontisto: "Fontisto",
-  foundation: "Foundation",
-  ionicons: "Ionicons",
-  "material-community": "MaterialCommunityIcons",
-  material: "MaterialIcons",
-  octicons: "Octicons",
-  "simple-line-icons": "SimpleLineIcons",
-  zocial: "Zocial",
-  // FontAwesome5 style variants (key = `FontAwesome5Free-<style>`)
-  "FontAwesome5Free-Regular": "FontAwesome5_Regular",
-  "FontAwesome5Free-Solid": "FontAwesome5_Solid",
-  "FontAwesome5Free-Brand": "FontAwesome5_Brands",
-  // FontAwesome6 style variants (key = `FontAwesome6Free-<style>`)
-  "FontAwesome6Free-Regular": "FontAwesome6_Regular",
-  "FontAwesome6Free-Solid": "FontAwesome6_Solid",
-  "FontAwesome6Free-Brand": "FontAwesome6_Brands",
-};
-
-const cdnUrl = (file: string): string =>
-  `https://cdn.jsdelivr.net/npm/@expo/vector-icons@${ICON_VECTOR_VERSION}/build/vendor/react-native-vector-icons/Fonts/${file}.ttf`;
-
-const iconFontMap = (): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(ICON_FAMILIES).map(([key, file]) => [key, cdnUrl(file)]),
-  );
-
-export const useIconFonts = (): readonly [boolean, Error | null] =>
-  useFonts(
-    Constants.executionEnvironment === ExecutionEnvironment.StoreClient
-      ? iconFontMap()
-      : {},
-  );
+// Legacy compatibility export — some screens import this expecting a
+// [ready, error] tuple hook. Fonts are always "ready" at this point.
+export const useIconFonts = (): readonly [boolean, Error | null] => [true, null] as const;

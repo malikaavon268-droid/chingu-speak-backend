@@ -1,0 +1,23 @@
+# OSX
+#
+.DS_Store
+
+# Android/IntelliJ
+#
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+.cxx/
+
+# Bundle artifacts
+*.jsbundle
+
+# --- Gradle wrapper ---
+# Defensive whitelist: never let a future *.jar rule accidentally drop the
+# Gradle wrapper jar. CI's ./gradlew requires this file at
+# gradle/wrapper/gradle-wrapper.jar or the build cannot start.
+!gradle/wrapper/gradle-wrapper.jar
+!gradle-wrapper.jar

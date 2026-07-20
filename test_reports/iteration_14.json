@@ -1,0 +1,62 @@
+{
+  "summary": "First testing pass after re-enabling REAL navigation (Testing Screen bypass removed). Real onboarding -> Home tabs -> Chat/Translate/Voice/Camera/Saved/Profile all render and navigate correctly with no Gray Screen or AppErrorBoundary trip. Backend: 13/13 pytest cases passed (ping, public/settings, languages, translate, chat round-trip, history CRUD, mobile auth register/login, admin login/stats, transcribe graceful 503). Admin login (chingunadi/0644782611) works end-to-end into the Admin Panel. CRITICAL frontend bug found: the always-mounted StartupConsoleOverlay physically overlaps and intercepts touch events on any interactive element positioned in the top ~112px of a screen — reproduced concretely on the Auth screen's Login/Register tab buttons (register tab click never switches mode; users cannot register from the mobile UI while diagnostics overlay is on).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/transcribe", "issue": "Returns 503 'Speech transcription is not configured' because DEEPGRAM_API_KEY is not set — expected/known limitation per task context, does not crash the app."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "StartupConsoleOverlay (src/components/StartupConsoleOverlay.tsx)",
+        "issue": "Overlay is position:absolute with zIndex:100 and top:(StatusBar.currentHeight||0)+8, occupying roughly y=8 to y=112px on a 375x667 viewport even when collapsed. Any interactive control rendered in that same vertical band on any screen becomes unclickable because document.elementFromPoint at the control's center resolves to the overlay's DIV, not the control. Reproduced on Auth screen: tapping data-testid=auth-tab-register never switches mode (title/button text stays 'Sign In', confirm-password field never appears, so real user registration via the mobile UI is blocked) whenever EXPO_PUBLIC_STARTUP_DIAGNOSTICS=true.",
+        "testID": "startup-console-overlay / auth-tab-register",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Mobile user registration via Auth screen UI",
+        "issue": "Register tab tap is swallowed by the overlapping StartupConsoleOverlay, so the screen never enters register mode; backend POST /api/auth/register itself works fine (verified directly via pytest). This is a UI touch-target regression introduced by keeping the diagnostics overlay always mounted, not a backend bug.",
+        "affected_testIDs": ["auth-tab-register", "auth-confirm-password", "auth-submit"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Global (any screen with controls near the top safe-area)",
+        "issues": ["StartupConsoleOverlay's absolute-positioned touch-blocking band (~104px tall) has no pointerEvents passthrough for its empty/transparent regions and no z-index coordination with screen headers/tabs; consider pointerEvents='box-none' on the ScrollView/header wrapper outside the actual console lines, or shrinking/repositioning it away from common header/tab zones."]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chingu_speak_endpoints.py",
+    "/app/test_reports/pytest/pytest_results_iter14.xml"
+  ],
+  "action_items": [
+    "Fix StartupConsoleOverlay touch-blocking: add pointerEvents='box-none' to the outer shell View so only the header Pressable and expanded log lines are tappable, letting taps pass through to underlying screen content in the collapsed/transparent areas.",
+    "Re-verify Auth screen register flow end-to-end in the UI after the overlay fix (tab switch, confirm-password field, successful POST /api/auth/register + redirect to profile).",
+    "Audit other screens with headers/back-buttons/tabs in the top ~120px (chat-back, admin-back, translate header controls) for the same overlay-blocking risk — only Auth screen was concretely reproduced in this pass due to time, but the root cause is global and CSS-position based, not screen-specific.",
+    "/app/memory/test_credentials.md is present but empty (only template comments) — no admin/test user credentials were recorded there; admin credentials were sourced from backend/.env per the review request instead."
+  ],
+  "critical_code_review_comments": [
+    "frontend/app/_layout.tsx: real navigation flow (GestureHandlerRootView > SafeAreaProvider > AppErrorBoundary > AppRuntime + StartupConsoleOverlay) is clean and matches the requested architecture; splash-hide watchdog + onLayout dual path looks solid.",
+    "backend/mobile_routes.py and backend/server.py both implement /translate, /chat, /history, /auth, /admin/login with proper async/await, Pydantic validation, and HTTPException status codes (400/401/403/409/423/500/503) — no blocking sync IO observed in the request path.",
+    "mobile_routes.py resolve_active_llm() has a sensible 3-tier fallback (admin DB key -> any active key -> EMERGENT_LLM_KEY env) that kept /translate and /chat working in this environment.",
+    "StartupConsoleOverlay.tsx: the shell View covers the full width and lacks pointerEvents scoping, meaning it is a full-bleed hit-testable region even where it renders no visible content — this is the root cause of the register-tab bug above."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_chingu_speak_endpoints.py",
+    "/app/test_reports/iteration_14.json"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 pytest)",
+    "frontend": "~90% (all requested screens render/navigate without crash; one concrete interaction-blocking bug found on Auth register tab, likely affects other top-of-screen controls)"
+  },
+  "seed_data_creation": "Test users prefixed TEST_ created and cleaned up via /api/auth/delete-account during pytest run. One TEST_source/TEST_translated history item created and deleted during pytest run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Real navigation is confirmed stable: onboarding -> Home tabs (Home/Translate/Voice-mic/Saved/Profile) all render, chat round-trip (POST /api/chat), translate round-trip (POST /api/translate), camera screen render + permission UI, voice screen render, and admin login -> admin panel all verified live via Playwright + curl-equivalent pytest. No AppErrorBoundary trip and no Gray Screen observed anywhere in this pass. The one real bug is the StartupConsoleOverlay hit-testing over the top ~112px of the screen blocking taps on elements in that band (reproduced on Auth register tab). After main agent fixes the overlay's pointerEvents, retest: (1) Auth register+login end-to-end via UI, (2) spot-check chat-back/admin-back/translate header controls for the same overlay-blocking pattern, (3) confirm StartupConsoleOverlay remains visible for diagnostics but no longer intercepts touches.",
+  "rca_of_issue": "Root cause: StartupConsoleOverlay.tsx renders an absolute-positioned View (top: statusBarHeight+8, left:10, right:10, zIndex:100) containing a Pressable header + ScrollView, with no pointerEvents scoping applied to the outer shell. Even in its 'compact' state the shell's bounding box is roughly y=8 to y=112 on a 375x667 viewport. Any TouchableOpacity/Pressable rendered by a screen in that same y-range (e.g., Auth screen's Login/Register tab row at y=82-122) sits underneath this shell in DOM z-order, so document.elementFromPoint resolves to the overlay's container DIV instead of the intended control, silently swallowing the tap. Repro steps: open Auth screen (Profile -> Sign In or Create Account), tap the 'Register' tab; verified via bounding-box + elementFromPoint that the overlay's rect (top 8-112) overlaps the register tab's rect (top 82-122), and elementFromPoint at the tab's center returns a generic DIV, not data-testid=auth-tab-register. Mitigation: add pointerEvents='box-none' to the overlay's outer View (styles.shell) so transparent/empty areas pass touches through, keeping only the header Pressable and expanded ScrollView content interactive."
+}

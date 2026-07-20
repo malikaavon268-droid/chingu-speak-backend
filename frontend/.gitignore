@@ -5,7 +5,6 @@ node_modules/
 
 # Expo
 .expo/
-.metro-cache/
 dist/
 web-build/
 expo-env.d.ts
@@ -14,6 +13,8 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
+keystore_b64.txt
 *.p8
 *.p12
 *.key

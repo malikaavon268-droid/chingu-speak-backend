@@ -1,0 +1,57 @@
+{
+  "summary": "Frontend-only verification completed for release splash hardening. Mobile web onboarding and onboarding→home navigation passed with no startup runtime errors. Source-level checks confirm splash hide fallbacks, bounded preference initialization, API request timeout/abort handling, and root Error Boundary wiring.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Expo web preview startup/home",
+        "issues": [
+          "Console warning: \"shadow*\" style props are deprecated; use boxShadow",
+          "Console warning: props.pointerEvents is deprecated; use style.pointerEvents"
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/frontend/app/_layout.tsx",
+    "/app/frontend/src/api/client.ts",
+    "/app/frontend/src/components/AppErrorBoundary.tsx",
+    "/app/frontend/src/utils/timeout.ts",
+    "/app/frontend/src/state/prefs.ts",
+    "/app/frontend/src/hooks/use-monetization-sync.ts",
+    "/app/test_reports/artifacts_iter/iteration10_onboarding_mobile.jpeg",
+    "/app/test_reports/artifacts_iter/iteration10_home_mobile.jpeg",
+    "/root/.emergent/automation_output/20260713_060947/console_20260713_060947.log"
+  ],
+  "action_items": [
+    "Run physical Android release APK cold-start validation to confirm splash freeze is resolved on-device (web preview cannot prove native splash behavior).",
+    "Optionally clean deprecated RN-web style warnings (shadow*/pointerEvents) to reduce startup console noise."
+  ],
+  "critical_code_review_comments": [
+    "PASS: app/_layout.tsx safely catches SplashScreen.preventAutoHideAsync() and hideAsync() rejections.",
+    "PASS: Three independent splash release paths are present: root onLayout hide, 3-second fallback hide, unconditional 8-second emergency hide.",
+    "PASS: Preference initialization is bounded with withTimeout(loadPrefs(), 6000) and startup continues with defaults on failure.",
+    "PASS: src/api/client.ts request() uses AbortController with default 8000ms timeout and proper timer/listener cleanup in finally.",
+    "PASS: Root is wrapped with AppErrorBoundary, which hides splash in componentDidCatch and fallback onLayout, and supports retry.",
+    "PASS: Startup useEffect flows in _layout are non-blocking for root rendering (no await gating before appReady render path)."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "N/A (frontend-only scope)",
+    "frontend": "100% (requested web-verifiable checks)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All requested source invariants for splash hardening are present and web regression passed. Remaining risk is native-only cold start behavior in signed Android APK; validate on affected device/build channel.",
+  "rca_of_issue": "No new blocking defect reproduced in this iteration. Constraint: native splash freeze is an Android release startup condition not directly reproducible in Expo web preview; this run validates guardrails and regressions only.",
+  "test_credentials": "Not required for this frontend startup/onboarding scope. /app/memory/test_credentials.md is present but empty."
+}

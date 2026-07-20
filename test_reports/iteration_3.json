@@ -1,0 +1,62 @@
+{
+  "summary": "Frontend-only mobile web validation completed for language switching and Back navigation. Spanish/Korean tab+settings labels update immediately, Arabic translations are present on shared settings controls, and both required Back flows work. Native RTL refresh behavior was verified by code path (not executable in web preview).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Settings/App Language back buttons",
+        "issue": "Back icons are hardcoded as chevron-back in settings screens instead of using RTL-aware icon logic, so Arabic users may see opposite-direction arrow affordance.",
+        "testID": "settings-back, applang-back",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Initial app load",
+        "issue": "Browser console shows 404 for /api/public/settings during preview run.",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/frontend/src/i18n/index.ts",
+    "/app/frontend/src/constants/app-data.ts",
+    "/app/frontend/src/state/prefs.ts",
+    "/app/frontend/app/_layout.tsx",
+    "/app/frontend/app/settings/app-language.tsx",
+    "/app/frontend/app/settings/index.tsx",
+    "/app/frontend/app/(tabs)/_layout.tsx",
+    "/app/frontend/src/components/AppBackButton.tsx",
+    "/app/test_reports/artifacts_iter/language_flows_mobile.jpeg",
+    "/app/test_reports/artifacts_iter/language_settings_evidence.jpeg"
+  ],
+  "action_items": [
+    "Use AppBackButton (or equivalent RTL-aware icon logic) in settings/app-language headers so back arrow direction mirrors for RTL locales.",
+    "Confirm/fix /api/public/settings 404 if this endpoint is expected during startup.",
+    "Run one native-device retest for Arabic to validate full RTL direction refresh after Updates.reloadAsync (web preview cannot fully verify native layout direction behavior)."
+  ],
+  "critical_code_review_comments": [
+    "PASS: APP_LANGUAGES locale codes (en, es, fr, de, ja, ko, it, zh, pt, ru, ar, nl, tr, pl, vi) are represented in src/i18n/index.ts packs/AppLocale.",
+    "PASS: Translation helper provides safe fallback to English via return active[key] || en[key].",
+    "PASS: Arabic/native RTL switch path exists (applyLayoutDirection + Updates.reloadAsync on non-web).",
+    "OBSERVED: settings and app-language screens use local TouchableOpacity back icons instead of shared RTL-aware AppBackButton component.",
+    "NOTE: /app/memory/test_credentials.md is missing; no auth flows were required in this run."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {
+    "backend": "N/A (skipped by request)",
+    "frontend": "90%"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Core requested flows passed on web preview: ES/KO label updates, AR translations on shared controls, and both Back behaviors (App Language -> Settings, Settings -> Profile). Web remained LTR after Arabic (expected limitation of this preview path); native RTL requires device verification.",
+  "rca_of_issue": "Back icon mismatch RCA: Settings and App Language headers directly render Ionicons chevron-back instead of shared AppBackButton that checks I18nManager.isRTL. Repro: switch to Arabic, open settings/app-language, observe back icon orientation remains fixed. Mitigation: replace these buttons with AppBackButton or mirror icon based on RTL state."
+}

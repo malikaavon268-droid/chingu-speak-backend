@@ -1,24 +1,36 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Chingu Speak",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "scheme": "polyglotai",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.chinguspeakbackend.jjh6b6"
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan text in photos to translate instantly",
+        "NSMicrophoneUsageDescription": "Translate your voice into any language",
+        "NSPhotoLibraryUsageDescription": "Pick photos with text to translate"
+      },
+      "bundleIdentifier": "com.emergent.chinguspeakmobile.at9w86"
     },
     "android": {
+      "package": "com.nadwap.chinguspeak",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#A78BFA"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.chinguspeakbackend.jjh6b6"
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -30,15 +42,44 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#F5F1FF"
         }
-      ]
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/ionicons.ttf",
+            "./assets/fonts/feather.ttf",
+            "./assets/fonts/material.ttf"
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Translate your voice into any language"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pick photos with text to translate",
+          "cameraPermission": "Take photos to translate text instantly"
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {}
     }
   }
 }

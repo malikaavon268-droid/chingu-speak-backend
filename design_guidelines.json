@@ -1,0 +1,138 @@
+{
+  "app_name": "Chingu Speak",
+  "personality": "4 Tactile / Playful LIGHT",
+  "personality_one_liner": "A friendly, rewarding, and globally accessible language learning space that celebrates progress in every dialect.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#1F2937",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#374151",
+    "surfaceTertiary": "#F3F4F6",
+    "onSurfaceTertiary": "#4B5563",
+    "surfaceInverse": "#1F2937",
+    "onSurfaceInverse": "#FDFBF7",
+    "brand": "#10B981",
+    "brandPrimary": "#10B981",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#34D399",
+    "onBrandSecondary": "#022C22",
+    "brandTertiary": "#D1FAE5",
+    "onBrandTertiary": "#065F46",
+    "success": "#22C55E",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#14B8A6",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7EB",
+    "borderStrong": "#9CA3AF",
+    "divider": "#F3F4F6"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Nunito",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding to keep UI touchable and friendly. Use structural modules instead of flat lists. Avoid cramped spacing.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "pill": 999
+  },
+  "shadow_tier": "2",
+  "navigation": "bottom_tabs with nested stacks for back navigation on deep screens",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Use glass effect on sticky bottom tab bar.",
+      "Use glass on sticky top headers over scrollable lists."
+    ],
+    "dont's": [
+      "Do not use glass on language selection list rows or lesson cards.",
+      "Do not over-blur the background if text loses legibility."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler",
+    "localization": "expo-localization and i18n-js for multi-language handling"
+  },
+  "screens": [
+    {
+      "name": "Home (Dashboard)",
+      "purpose": "Displays language learning progress, streaks, and current lesson path.",
+      "states": {
+        "loading": "Skeleton cards representing lesson modules.",
+        "empty": "Illustration of paper airplane with 'Start your first lesson' CTA.",
+        "error": "Error message with 'Retry' to reload progress."
+      },
+      "layout": "A scrollable vertical path of chunky, rounded lesson modules (like Duolingo). Include a sticky top header showing current streak and active language. Bottom tab navigation persists."
+    },
+    {
+      "name": "Language Selection",
+      "purpose": "Allow users to switch between Spanish, Korean, Arabic, and other supported languages.",
+      "states": {
+        "loading": "Centered spinner.",
+        "empty": "N/A - static list.",
+        "error": "N/A."
+      },
+      "layout": "A stacked list of chunky, touch-friendly cards for each language. The active language card is highlighted using `brandPrimary`. A sticky 'Confirm' CTA at the bottom to trigger the `I18nManager` RTL/LTR switch and restart the app."
+    },
+    {
+      "name": "Lesson Detail (Stack Screen)",
+      "purpose": "A specific exercise or lesson content.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "N/A.",
+        "error": "Standard error prompt."
+      },
+      "layout": "Header MUST include a Back button. Progress bar at the top (mirrored if RTL). Big playful interaction cards in a 2-column or single-column layout depending on exercise type."
+    }
+  ],
+  "images": {
+    "empty_state_illustration": {
+      "url": "https://images.unsplash.com/photo-1760009229725-7ef1990e585f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxsYW5ndWFnZSUyMGxlYXJuaW5nJTIwYXBwJTIwYWJzdHJhY3QlMjBiYWNrZ3JvdW5kJTIwaWxsdXN0cmF0aW9ufGVufDB8fHx8MTc4MzIyMzMyOHww&ixlib=rb-4.1.0&q=85",
+      "alt": "School supplies floating with a paper airplane."
+    }
+  },
+  "instructions_to_main_agent": [
+    "PREMIUM RULE: All non-home screens MUST display a back button in the header. Use Expo Router's Stack navigator inside the tabs, or `router.push` to navigate to modal/stack screens. Ensure the Back chevron icon points RIGHT when the app is in RTL mode (Arabic).",
+    "PREMIUM RULE: Use `I18nManager` from `react-native` to handle RTL layout switching. When changing to an RTL language (Arabic), you must call `I18nManager.allowRTL(true)` and `I18nManager.forceRTL(true)`, then reload the app (e.g., using `expo-updates` or alerting the user to restart).",
+    "LEARNING: For Arabic layout, ensure containers are fluid. Right-align text by default in RTL mode. Increase line-height to 1.6-1.8 and ensure a minimum font size of 14-16px for Arabic text to maintain readability.",
+    "LEARNING: Do NOT mirror logos, Western numbers, or non-directional icons (like cameras or brand marks). Progress bars and directional arrows (Back/Forward) MUST be mirrored.",
+    "Avoid blue/purple hues entirely. Stick to the provided playful mint/green brand palette. Use thick, touchable elements with radius `md` to `lg`."
+  ],
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "language_select": "selection",
+    "lesson_complete": "notificationSuccess",
+    "tab_change": "selection"
+  }
+}

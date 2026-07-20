@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only testing of the new fully-offline Learn/Tutor Mode curriculum (30 lessons, 15 languages). All 9 requested scenarios were exercised live via Playwright against the public Expo web preview and PASSED: lesson path rendering with XP/progress bar, strict sequential locking (only lesson 1 unlocked initially, all others show lock icon + hint), full vocab->quiz->result flow with correct partial-XP scaling (1/3 correct = +7 XP = round(20*1/3)), AsyncStorage persistence across navigation (XP and completed-lesson state survived a full page navigation to /learn and back), lesson 2 unlocking immediately after lesson 1 completion, retry-of-completed-lesson correctly shows +0 XP and 'Review complete' note with NO contradictory XP text (the previously-fixed bug does not regress), modes.tsx Tutor preview renders instantly from Lesson 1 content with no spinner/network call, deep-linking directly to a locked level-5 lesson (/lesson/business) safely redirects to /learn, and switching target language to Hindi (no dedicated pack) shows the fallback banner and silently serves English content instead of crashing. The home screen 'Continue Learning' -> lesson routing code was verified via code review (app/(tabs)/index.tsx lines 228-245 correctly branch on history.length===0 to push /lesson/<nextLessonId> with the lesson title as subtitle) but could not be exercised live in the empty-history state because the test browser session already had pre-existing translate/chat history, which correctly triggered the alternate (history-list) branch instead — this is expected/correct behavior per the code, not a bug.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "No fixes required for this feature. Optional: if main agent wants explicit live verification of the home 'Continue Learning' -> /lesson/<id> empty-history path, test with a fresh account/session that has zero translate/chat history (current preview session already has history)."
+  ],
+  "critical_code_review_comments": [
+    "src/state/progress.ts completeModule() correctly derives alreadyDone from the pre-mutation state.done.includes(id) check and returns it in the result object, which lesson/[id].tsx now reads directly (res.alreadyDone) instead of re-deriving from live state post-mutation — this is the correct fix for the previously reported XP/already-done contradiction and was confirmed not to regress.",
+    "src/data/lessons/unlock.ts isLessonUnlocked/getNextLessonId are pure functions operating on LESSONS order — clean, testable, no issues found.",
+    "app/lesson/[id].tsx correctly guards invalid/locked lesson ids via a useEffect + router.replace('/learn') with valid computed from meta && content && unlocked — confirmed working for a level-5 locked lesson deep link.",
+    "app/modes.tsx getLessonContent(prefs.to, 'greetings') is called synchronously in a useMemo with no async/loading state, matching the 'no spinner, no network' requirement.",
+    "StartupConsoleOverlay.tsx (flagged as HIGH priority in iteration_14) now correctly uses pointerEvents='box-none' on the shell and pointerEvents='none' on its ScrollView — the previously reported touch-blocking regression is fixed and did not interfere with any lesson/learn screen interactions in this pass."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend-only testing scope)", "frontend": "100% (9/9 requested scenarios verified)" },
+  "seed_data_creation": "None — all state used was local AsyncStorage/localStorage in the test browser session, no backend data created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Offline Learn/Tutor Mode feature is solid: locking, XP math, persistence, already-done handling, fallback language banner, and deep-link safety all verified working. Chat/Voice modes were not touched in this session (out of scope) and were not retested. If future sessions need to test the home-screen empty-history 'Continue Learning' card end-to-end, use a browser context/account with zero prior translate/chat history.",
+  "rca_of_issue": "N/A — no new bugs found in this pass."
+}

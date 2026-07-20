@@ -1,0 +1,68 @@
+{
+  "summary": "Executed backend+frontend startup diagnostics verification for deep splash-freeze isolation changes. Core startup trace endpoints and mobile web startup flows pass, but lint and Android export checks currently fail.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "startup-debug in normal preview (STARTUP_BYPASS=false)",
+        "issue": "Route is reachable and renders debug screen while AppRuntime initialization also runs; true bypass behavior is only guaranteed in APK profile with EXPO_PUBLIC_STARTUP_BYPASS=true.",
+        "affected_testIDs": ["startup-debug-screen", "hero-start-chat"]
+      },
+      {
+        "flow": "Android JS export",
+        "issue": "expo export -p android failed during Hermes bytecode generation due hermesc execution error in current environment.",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "global",
+        "issues": [
+          "RN Web deprecation warning: shadow* style props are deprecated (use boxShadow).",
+          "RN Web deprecation warning: props.pointerEvents is deprecated (use style.pointerEvents)."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_startup_diagnostics_flow.py",
+    "/app/test_reports/pytest/pytest_iteration12_startup_diag.xml",
+    "/app/test_reports/artifacts_iter/iteration12_ui/iteration12_onboarding_mobile.jpeg",
+    "/app/test_reports/artifacts_iter/iteration12_ui/iteration12_home_mobile.jpeg",
+    "/app/test_reports/artifacts_iter/iteration12_ui/iteration12_startup_debug_route.jpeg",
+    "/root/.emergent/automation_output/20260713_081343/console_20260713_081343.log"
+  ],
+  "action_items": [
+    "Fix lint blocker in frontend/app/modes.tsx (react/no-unescaped-entities) and clear remaining warnings before release gating.",
+    "Investigate Hermes compiler runtime issue in this environment (hermesc execution failure) and re-run Android export validation.",
+    "If startup-debug must be APK-only, gate the route when EXPO_PUBLIC_STARTUP_BYPASS=false to avoid normal-preview exposure."
+  ],
+  "critical_code_review_comments": [
+    "PASS: frontend/app/_layout.tsx keeps startup shell minimal and lazy-loads AppRuntime via React.lazy + Suspense.",
+    "PASS: AppRuntime defers prefs, icon warmup, layout direction, monetization, streak, and keepalive to post-render effects.",
+    "PASS: eas.json flags are correct (apk: bypass=true+diagnostics=true; preview/production profiles keep bypass=false).",
+    "PASS: startup-trace emits checkpoints and backend /api/startup-diagnostics + /api/startup-diagnostics/latest persist/query with Mongo _id excluded.",
+    "PASS: MainActivity includes native 10-second SplashScreenManager.hide watchdog and startup Log markers.",
+    "PASS: use-icon-fonts is a no-op (no runtime CDN loading), matching startup hardening intent.",
+    "PASS: MainApplication getJSMainModuleName remains .expo/.virtual-metro-entry (unchanged)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_startup_diagnostics_flow.py",
+    "/app/test_reports/iteration_12.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 targeted startup diagnostics tests)",
+    "frontend": "80% (core startup/navigation pass; lint/export gate checks failed)"
+  },
+  "seed_data_creation": "Created TEST_startup_* diagnostics session documents via API; no persistent auth seed data created.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Physical signed APK cannot be launched in this environment. Use /api/startup-diagnostics/latest after APK run to validate real-device checkpoints. test_credentials file exists but is empty.",
+  "rca_of_issue": "Export failure reproduces consistently with `npx expo export -p android`: Hermes bytecode step cannot execute bundled hermesc binary (`ELF ... not found`/syntax error), indicating environment toolchain/binary compatibility issue rather than app runtime logic. Lint gate also fails due unescaped apostrophe in app/modes.tsx.",
+  "test_credentials": "Read /app/memory/test_credentials.md before auth flows; file is present but empty."
+}
