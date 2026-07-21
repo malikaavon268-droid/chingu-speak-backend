@@ -35,7 +35,13 @@ jobs:
           cache: gradle
 
       - name: Install JavaScript dependencies
-        run: yarn install --frozen-lockfile
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          else
+            echo "yarn.lock not found — installing without frozen lockfile"
+            yarn install
+          fi
 
       - name: Verify embedded vector fonts
         run: |
