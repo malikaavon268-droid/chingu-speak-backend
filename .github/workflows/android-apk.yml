@@ -1,4 +1,4 @@
-name: Android Diagnostic APK
+name: Android Release APK
 
 on:
   workflow_dispatch:
@@ -7,14 +7,13 @@ on:
 
 jobs:
   build-android-apk:
-    name: Self-contained Debug APK Build
+    name: Release APK Build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     env:
-      CHINGU_SELF_CONTAINED_DEBUG: "true"
-      EXPO_PUBLIC_BACKEND_URL: "https://chingu-mobile-dev.preview.emergentagent.com"
+      EXPO_PUBLIC_BACKEND_URL: "https://chingu-speak-backend.preview.emergentagent.com"
       EXPO_PUBLIC_STARTUP_BYPASS: "false"
       EXPO_PUBLIC_STARTUP_DIAGNOSTICS: "true"
 
@@ -85,20 +84,20 @@ jobs:
           test -s "$JAR"
           echo "Regenerated wrapper jar ($(wc -c < "$JAR") bytes)"
 
-      - name: Build self-contained debug APK
+      - name: Build release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
-          test -f app/build/outputs/apk/debug/app-debug.apk
+          ./gradlew :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
 
       - name: Verify JS bundle is embedded in APK
         run: |
           set -euo pipefail
-          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APK=android/app/build/outputs/apk/release/app-release.apk
           echo "Inspecting $APK"
           unzip -l "$APK" | grep -E "assets/index\.android\.bundle" || {
-            echo "::error::index.android.bundle is MISSING from the APK. selfContainedDebug bundling did not run. Debug APK will white-screen because it will try to reach Metro on the device."
+            echo "::error::index.android.bundle is MISSING from the release APK. The JS bundle did not get embedded — the app would show a blank screen because no JS can load."
             unzip -l "$APK" | head -80
             exit 1
           }
@@ -110,10 +109,10 @@ jobs:
           fi
           echo "::notice::APK contains a valid embedded JS bundle (${BUNDLE_SIZE} bytes)."
 
-      - name: Upload diagnostic APK
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: chingu-speak-diagnostic-debug-apk
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          name: chingu-speak-release-apk
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
