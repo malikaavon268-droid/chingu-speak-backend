@@ -140,6 +140,9 @@ const live = {
   tts: (body: { text: string; target_lang?: string; voice?: string; speed?: number; app_locale?: string }) =>
     request<TTSResult>("/tts", { method: "POST", body: JSON.stringify(body) }),
 
+  pronounceScore: (body: { text: string; language?: string; app_locale?: string }) =>
+    request<{ score: number; tip: string }>("/pronounce-score", { method: "POST", body: JSON.stringify(body) }),
+
   chat: (body: {
     session_id: string;
     message: string;
@@ -323,6 +326,8 @@ export const api = {
     MOCK_API_ENABLED ? mocks.transcribe(args[0]) : live.transcribe(...args),
   tts: (...args: Parameters<typeof live.tts>) =>
     MOCK_API_ENABLED ? mocks.tts() : live.tts(...args),
+  pronounceScore: (...args: Parameters<typeof live.pronounceScore>) =>
+    live.pronounceScore(...args),
   chat: (...args: Parameters<typeof live.chat>) =>
     MOCK_API_ENABLED ? mocks.chat(args[0]) : live.chat(...args),
   creditsMe: (...args: Parameters<typeof live.creditsMe>) =>

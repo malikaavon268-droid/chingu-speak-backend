@@ -1,0 +1,41 @@
+{
+  "summary": "All 3 iter-19 concerns validated. BACKEND (9/9 pytest, /app/backend/tests/test_pronounce_and_regression.py): (1) NEW POST /api/pronounce-score returns proper {score:int 0-100, tip:non-empty str} for French ('Bonjour, je m'appelle Marie', app_locale=en) AND for Korean romanization (language=ko). Empty text returns 400 as required. (2) TTS regression — POST /api/tts {voice:'nova', speed:1.25} returns non-empty audio_base64 (>500B); voice omitted also 200 (server defaults via lang_voice). (3) Whisper transcribe fallback — synthesized English audio via /api/tts then POST /api/transcribe {mime_type:'audio/mpeg', language:'en'} returned real transcribed text on the first try (no Deepgram key configured, so Whisper path exercised). (4) Admin regression — /api/admin/login (chingunadi/0644782611) issues token, GET /api/admin/settings with Bearer -> 200 {deepgram_stt_model:'nova-2', ...}, POST /api/admin/settings {key:'deepgram_stt_model', value:'nova-2'} -> 200 {ok:true}, GET without token -> 401. FRONTEND (mobile 390x900, /voice-screen): mounts cleanly (mascot + voice-status-text 'Tap Chingu to start the live chat'); no redbox. Header PressableScale icons voice-open-voice-settings and voice-swap-langs both visible and tappable. Tapping voice-open-voice-settings opens voice-picker-card modal containing ALL 6 voice testIDs (voice-option-nova/shimmer/alloy/echo/onyx/coral) and ALL 4 speed testIDs (voice-speed-0.75/1/1.25/1.5). Selecting Shimmer + 1.25× shows active state (bg rgb(139,92,246)); tapping voice-picker-done closes the sheet; reopening the picker shows Shimmer + 1.25× still highlighted — per-language persistence via prefs store verified. Note: the native iOS/Android audio-session speaker-routing fix and the score PILL after a real spoken turn cannot be exercised on web preview (no mic, native routing differs). Backend /api/pronounce-score itself returns valid pill data, so the pill will render once the mic pipeline runs on device.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/voice-screen picker modal", "issues": ["On a 390x844 (iPhone SE) viewport the voice-picker-card + Done button extend just below the visible area — Playwright reported 'Element is outside of the viewport' when clicking voice-option-shimmer with a real click; JS click worked. On a real device with safe-area bottom insets this may push Done partially under the home indicator. Consider wrapping the picker contents in a ScrollView or reducing paddingTop on modalCard. Reference: /app/frontend/app/voice-screen.tsx:820-824"]}
+    ],
+    "react_native_issues": [
+      {"component": "expo-file-system/legacy", "issue": "voice-screen.tsx still imports 'expo-file-system/legacy'. Works on current SDK but the legacy subpath is scheduled for removal — plan a migration to the new expo-file-system File/Directory API. Reference: /app/frontend/app/voice-screen.tsx:19"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pronounce_and_regression.py",
+    "/app/test_reports/pytest/iter19_pronounce.xml",
+    "/app/test_reports/artifacts_iter/iter19_selected.jpeg",
+    "/app/test_reports/artifacts_iter/iter19_reopen.jpeg"
+  ],
+  "action_items": [
+    "No blockers. Optional: on ≤844px viewports the voice picker's Done button sits at the very bottom edge — wrap chip groups in a ScrollView OR shorten modalCard paddingTop/paddingBottom so it fits comfortably above the safe-area bottom inset.",
+    "Optional (unchanged from iter-18): migrate voice-screen.tsx off 'expo-file-system/legacy' before the subpath is removed in a future Expo SDK.",
+    "Web console warnings persist (non-blocking, unchanged from iter-18): 'Font.loadAsync patch failed', 'useNativeDriver not supported on web', 'shadow* deprecated → boxShadow'."
+  ],
+  "critical_code_review_comments": [
+    "Good: /api/pronounce-score is a strict allowlist path — empty text properly rejected with 400, JSON output is parsed with a defensive fallback (default score=75, tip default) so a malformed LLM reply cannot 500 the endpoint.",
+    "Good: pronounce-score reuses stream_llm_text + LlmChat with a per-request session_id, so it does not pollute the /api/chat session history.",
+    "Good: voice-screen.tsx calls AudioModule.setAudioModeAsync({allowsRecording:false, playsInSilentMode:true, shouldPlayInBackground:false, shouldRouteThroughEarpiece:false}) BOTH right after receiving TTS (in stop(), lines 366-371) AND again in the playback effect (lines 160-165), plus sets player.volume=1.0 (line 171) — this is the correct belt-and-suspenders fix for the iOS earpiece routing bug.",
+    "Good: PressableScale is a clean reusable spring-press wrapper (friction:6, tension:220, scaleTo:0.95) used consistently on the voice-screen header icons and the picker Done button. It skips haptics on web and cleans up on unmount via Animated.spring.",
+    "Minor: voice-screen picker modal is fixed-height and not wrapped in a ScrollView — on small phones (SE / 5.4\") the Done button can be pushed under the safe-area bottom inset."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pronounce_and_regression.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (voice-screen mount, picker open/close/persistence, PressableScale icons all working)"},
+  "seed_data_creation": "None — used existing seeded admin (chingunadi). test_settings_post writes deepgram_stt_model='nova-2' which is the current value (no-op).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Regression suite: pytest /app/backend/tests/test_pronounce_and_regression.py -v (9 tests, covers pronounce-score positive/empty/other-language, TTS voice+speed and voice-omitted, Whisper transcribe fallback, admin login+settings GET/POST/401). Combined with iter-18's test_admin_settings_and_voice_picker.py this covers all Chingu Speak public + admin surfaces. The iOS speaker-routing fix and the pronunciation-score pill rendering after a real spoken turn MUST be validated by the user on a physical device via Expo Go — web preview has no mic and native audio routing differs.",
+  "rca_of_issue": "N/A — all 3 iter-19 features (native audio-session fix, /api/pronounce-score endpoint + colored pill, PressableScale polish) verified working. The native audio-session fix itself is code-reviewed only (cannot be executed on web)."
+}

@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useAudioRecorder, useAudioRecorderState, useAudioPlayer, AudioModule, RecordingPresets } from "expo-audio";
@@ -21,6 +21,7 @@ import * as Haptics from "expo-haptics";
 
 import { api } from "@/src/api/client";
 import { usePrefs, swapLangs, loadPrefs, bumpStreak, setCredits, setVoiceForLang, setTtsSpeed } from "@/src/state/prefs";
+import PressableScale from "@/src/components/PressableScale";
 import { chinguIdleMascot, chinguActiveMascot, heartIcon, theme } from "@/src/theme";
 import AnimatedWaveform from "@/src/components/AnimatedWaveform";
 import FloatingMascot from "@/src/components/FloatingMascot";
@@ -66,7 +67,13 @@ const SPEED_OPTIONS: { value: number; label: string }[] = [
   { value: 1.5, label: "1.5×" },
 ];
 
-type Turn = { id: string; user: string; chingu: string; ts: number };
+function scoreColor(s: number) {
+  if (s >= 85) return "#22C55E";
+  if (s >= 65) return "#F59E0B";
+  return "#EF4444";
+}
+
+type Turn = { id: string; user: string; chingu: string; ts: number; score?: number; tip?: string };
 
 export default function VoiceScreen() {
   const router = useRouter();
@@ -74,6 +81,7 @@ export default function VoiceScreen() {
   const prefs = usePrefs();
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const recorderState = useAudioRecorderState(recorder, 200);
+  const insets = useSafeAreaInsets();
 
   const [sessionActive, setSessionActive] = React.useState(false);
   const [stage, setStage] = React.useState<"idle" | "recording" | "processing" | "done">("idle");
@@ -147,14 +155,21 @@ export default function VoiceScreen() {
     if (audioUri && player) {
       (async () => {
         try {
-          // iOS: switch out of record mode so TTS plays aloud on the speaker.
+          // iOS/Android: leave record mode and force the LOUD speaker (not the
+          // earpiece), otherwise Chingu's reply is near-silent after recording.
           if (!MOCK_WEB) {
-            await AudioModule.setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+            await AudioModule.setAudioModeAsync({
+              allowsRecording: false,
+              playsInSilentMode: true,
+              shouldPlayInBackground: false,
+              shouldRouteThroughEarpiece: false,
+            });
           }
         } catch {
           // non-fatal — attempt playback regardless
         }
         try {
+          try { (player as any).volume = 1.0; } catch { /* volume not settable yet */ }
           player.seekTo(0);
           player.play();
           setIsSpeaking(true);
@@ -307,19 +322,22 @@ export default function VoiceScreen() {
 
       // Conversational turn — Chingu replies in the practice language with the
       // chaotic Pingo persona (configured in src/api/mocks.ts + php-backend).
-      const chat = await api.chat({
-        session_id: sessionIdRef.current,
-        message: userText,
-        practice_lang: prefs.to,
-        teach_style: "roast",
-        app_locale: prefs.appLang,
-      });
+      const [chat, pron] = await Promise.all([
+        api.chat({
+          session_id: sessionIdRef.current,
+          message: userText,
+          practice_lang: prefs.to,
+          teach_style: "roast",
+          app_locale: prefs.appLang,
+        }),
+        api.pronounceScore({ text: userText, language: prefs.to, app_locale: prefs.appLang }).catch(() => null),
+      ]);
       if (typeof (chat as any).credits === "number") await setCredits((chat as any).credits);
       const chinguText = (chat.reply || "").trim();
 
       // Record turn into the rolling log (capped at MAX_LOG_TURNS).
       setTurns(prev => {
-        const next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, user: userText, chingu: chinguText, ts: Date.now() }];
+        const next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, user: userText, chingu: chinguText, ts: Date.now(), score: pron?.score, tip: pron?.tip }];
         return next.length > MAX_LOG_TURNS ? next.slice(next.length - MAX_LOG_TURNS) : next;
       });
 
@@ -343,6 +361,18 @@ export default function VoiceScreen() {
         if (Platform.OS === "web") {
           setAudioUri(`data:${t.mime};base64,${t.audio_base64}`);
         } else {
+          // Switch the iOS/Android audio session OUT of record mode and onto the
+          // loud speaker BEFORE the player loads, so the reply is actually audible.
+          try {
+            await AudioModule.setAudioModeAsync({
+              allowsRecording: false,
+              playsInSilentMode: true,
+              shouldPlayInBackground: false,
+              shouldRouteThroughEarpiece: false,
+            });
+          } catch {
+            // non-fatal — playback effect will retry the transition
+          }
           // Native players (iOS/Android) can't reliably play a data: URI — write
           // the mp3 to a cache file and play the file URI instead.
           const fileUri = `${FileSystem.cacheDirectory}chingu-tts-${Date.now()}.mp3`;
@@ -469,12 +499,12 @@ export default function VoiceScreen() {
           </TouchableOpacity>
           <Text style={styles.title}>{t("voiceChat")}</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <TouchableOpacity testID="voice-open-voice-settings" style={styles.topIcon} onPress={() => setShowVoicePicker(true)}>
+            <PressableScale testID="voice-open-voice-settings" style={styles.topIcon} onPress={() => setShowVoicePicker(true)}>
               <Ionicons name="options-outline" size={18} color={theme.text} />
-            </TouchableOpacity>
-            <TouchableOpacity testID="voice-swap-langs" style={styles.topIcon} onPress={swapLangs}>
+            </PressableScale>
+            <PressableScale testID="voice-swap-langs" style={styles.topIcon} onPress={swapLangs}>
               <Ionicons name="swap-horizontal" size={18} color={theme.text} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
 
@@ -588,6 +618,15 @@ export default function VoiceScreen() {
                       <Text style={styles.turnLabelChingu}>CHINGU</Text>
                       <Text style={styles.turnTextChingu}>{t.chingu}</Text>
                     </View>
+                    {typeof t.score === "number" && (
+                      <View style={styles.scoreRow} testID={`voice-turn-score-${t.id}`}>
+                        <View style={[styles.scorePill, { backgroundColor: scoreColor(t.score) }]}>
+                          <Ionicons name="mic" size={11} color="#fff" />
+                          <Text style={styles.scorePillText}>{t.score}</Text>
+                        </View>
+                        {!!t.tip && <Text style={styles.scoreTip} numberOfLines={2}>{t.tip}</Text>}
+                      </View>
+                    )}
                   </View>
                 ))}
               </ScrollView>
@@ -610,7 +649,7 @@ export default function VoiceScreen() {
           style={styles.modalBackdrop}
           onPress={() => setShowVoicePicker(false)}
         >
-          <TouchableOpacity activeOpacity={1} style={styles.modalCard} testID="voice-picker-card">
+          <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { paddingBottom: 24 + insets.bottom }]} testID="voice-picker-card">
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Chingu&apos;s Voice</Text>
             <Text style={styles.modalSub}>For {prefs.to?.toUpperCase() || "current language"} · saved per language</Text>
@@ -649,14 +688,13 @@ export default function VoiceScreen() {
               })}
             </View>
 
-            <TouchableOpacity
+            <PressableScale
               testID="voice-picker-done"
               style={styles.modalDoneBtn}
               onPress={() => setShowVoicePicker(false)}
-              activeOpacity={0.9}
             >
               <Text style={styles.modalDoneText}>Done</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -756,6 +794,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   turnRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  scorePill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, height: 22, borderRadius: 11 },
+  scorePillText: { color: "#fff", fontSize: 12, fontWeight: "900" },
+  scoreTip: { flex: 1, color: "#8B7AA6", fontSize: 11, fontWeight: "600", fontStyle: "italic" },
   turnLabelUser: {
     color: "#A78BFA", fontSize: 10, fontWeight: "900", letterSpacing: 0.6,
     width: 64, marginTop: 2,

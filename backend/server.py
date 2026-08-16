@@ -402,6 +402,61 @@ async def translate_image(req: ImageTranslateRequest):
     )
 
 
+class PronounceRequest(BaseModel):
+    text: str
+    language: str = "en"
+    app_locale: Optional[str] = "en"
+
+
+class PronounceResponse(BaseModel):
+    score: int
+    tip: str
+
+
+@api_router.post("/pronounce-score", response_model=PronounceResponse)
+async def pronounce_score(req: PronounceRequest):
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    target = lang_name(req.language)
+    tip_lang = lang_name(req.app_locale or "en")
+    system = (
+        "You are a warm, encouraging language pronunciation and fluency coach. "
+        'Respond ONLY with strict JSON: {"score": <int 0-100>, "tip": "<short tip>"}. '
+        "No code fences, no commentary."
+    )
+    prompt = (
+        f"A learner practicing {target} said (transcribed from speech):\n\"{text}\"\n\n"
+        f"Rate the sentence 0-100 for grammar, natural word choice and fluency in {target}. "
+        f"Be generous but honest. Then give ONE short, actionable tip (max 12 words) written in {tip_lang}. "
+        "Output JSON only."
+    )
+    session_id = f"pron-{uuid.uuid4()}"
+    try:
+        result = await stream_llm_text(
+            lambda: get_llm(session_id=session_id, system_message=system),
+            UserMessage(text=prompt),
+        )
+    except Exception as e:
+        logger.exception("Pronounce score failed")
+        raise HTTPException(status_code=500, detail=f"Scoring failed: {e}")
+
+    score = 75
+    tip = "Keep practicing — you're doing great!"
+    try:
+        raw = result.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw)
+        score = int(max(0, min(100, int(data.get("score", score)))))
+        tip = str(data.get("tip", tip)).strip() or tip
+    except Exception:
+        logger.warning("Pronounce score parse fallback")
+    return PronounceResponse(score=score, tip=tip)
+
+
 @api_router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(req: TranscribeRequest):
     if not req.audio_base64:
