@@ -1,0 +1,33 @@
+{
+  "summary": "Both requested regressions PASS end-to-end. Backend voice pipeline (guest, no auth): POST /api/tts (text='Hello, nice to meet you', target_lang=en) -> 200, audio_base64 decoded to ~52KB mp3 with mime 'audio/mpeg'. Feeding that audio_base64 back into POST /api/transcribe (mime_type='audio/mpeg', language='en') -> 200 with non-empty Whisper text. POST /api/chat (session_id='voice-regress-1', message='Teach me a Spanish greeting', practice_lang='es') -> 200 with non-empty reply. Zero 5xx/502 across the loop. Admin panel end-to-end: POST /api/admin/login (chingunadi / 0644782611) -> 200 with access_token; GET /api/admin/stats WITHOUT token -> 401 (auth enforced); GET /api/admin/stats WITH Bearer -> 200 with conversations=6, messages=24, translations=0 (ints); GET /api/admin/conversations -> 200 items:[...]; GET /api/admin/translations -> 200 items:[...]. Frontend web preview: /voice-screen mounts without redbox — mascot visible, testID 'voice-status-text' shows 'Tap Chingu to start the live chat', 'voice-mascot-start' is present (native mic bugs are not testable on web as noted). /admin-login mounts (admin-username, admin-password, admin-login-btn all visible); submitting the seeded credentials navigates to /admin and the dashboard loads live stats from the backend (6 Conversations · 24 Messages · 0 Translations rendered) — proving the in-app admin screens are correctly wired to the backend. 8/8 pytest cases green in 6s.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-file-system/legacy", "issue": "voice-screen.tsx imports 'expo-file-system/legacy'. Fine short-term (still ships with SDK 54), but the legacy subpath is scheduled for removal — plan a migration to the new File/Directory API. Reference: /app/frontend/app/voice-screen.tsx:18"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_voice_pipeline_and_admin.py",
+    "/app/test_reports/pytest/voice_admin_results.xml"
+  ],
+  "action_items": [
+    "No blockers. Optional: migrate voice-screen.tsx off 'expo-file-system/legacy' to the current expo-file-system API before it is fully removed in a future Expo SDK.",
+    "Console noise on web preview (non-blocking): 'shadow* style props deprecated — use boxShadow', 'props.pointerEvents deprecated — use style.pointerEvents', and 'Font.loadAsync patch failed: Cannot set property loadAsync of #<Object> which has only a getter'. Consider silencing the Font.loadAsync monkey-patch on web where it is a no-op."
+  ],
+  "critical_code_review_comments": [
+    "voice-screen.tsx correctly gates real recording behind Platform.OS !== 'web' via MOCK_WEB flag — good, matches E1's note that native recording/playback cannot be validated on web.",
+    "Admin auth is enforced server-side: /api/admin/stats without Authorization returned 401 as expected — no accidental public exposure.",
+    "TTS→Transcribe roundtrip proves EMERGENT_LLM_KEY is working for both OpenAI TTS and Whisper STT; Whisper actually transcribed the synthesized mp3 to real English text, so the pipeline is genuinely end-to-end (not stubbed).",
+    "backend_test note: sending ~52KB JSON via urllib historically hit Cloudflare 1010 at this preview edge; using requests.Session().post(...) works reliably — kept a curl fallback in the test just in case, but requests path succeeded on this run."
+  ],
+  "updated_files": ["/app/backend/tests/test_voice_pipeline_and_admin.py"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (voice-screen + admin-login + admin dashboard all render and wire correctly on web)"},
+  "seed_data_creation": "None — used the existing seeded admin (chingunadi) and public chat/tts/transcribe endpoints.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression file is /app/backend/tests/test_voice_pipeline_and_admin.py (8 tests, all pass). It relies on EXPO_PUBLIC_BACKEND_URL (or EXPO_BACKEND_URL) — run with: EXPO_PUBLIC_BACKEND_URL=https://chingu-speak-backend.preview.emergentagent.com pytest /app/backend/tests/test_voice_pipeline_and_admin.py -v. Native voice recording/playback bugs (the two fixes E1 shipped for cache-file TTS + audio mode swap) are NOT testable on web preview — you need Expo Go / an EAS dev build on a real device to validate those. On web, only the mounting/rendering of /voice-screen is validated.",
+  "rca_of_issue": "N/A — no bug reproduced. User's original 'voice not working' report was traced (by E1) to two native-only issues in voice-screen.tsx (data: URI playback and record-mode audio session), both patched. Backend voice pipeline was independently confirmed healthy in this iteration; the remaining validation must happen on a native device build."
+}

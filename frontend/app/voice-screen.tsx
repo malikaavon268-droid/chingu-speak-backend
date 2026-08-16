@@ -127,9 +127,23 @@ export default function VoiceScreen() {
   // Start audio playback once the TTS URI is set.
   React.useEffect(() => {
     if (audioUri && player) {
-      player.seekTo(0);
-      player.play();
-      setIsSpeaking(true);
+      (async () => {
+        try {
+          // iOS: switch out of record mode so TTS plays aloud on the speaker.
+          if (!MOCK_WEB) {
+            await AudioModule.setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+          }
+        } catch {
+          // non-fatal — attempt playback regardless
+        }
+        try {
+          player.seekTo(0);
+          player.play();
+          setIsSpeaking(true);
+        } catch {
+          // non-fatal
+        }
+      })();
     }
   }, [audioUri, player]);
 
@@ -307,7 +321,15 @@ export default function VoiceScreen() {
       try {
         const t = await api.tts({ text: chinguText, target_lang: prefs.to, app_locale: prefs.appLang });
         if (typeof (t as any).credits === "number") await setCredits((t as any).credits);
-        setAudioUri(`data:${t.mime};base64,${t.audio_base64}`);
+        if (Platform.OS === "web") {
+          setAudioUri(`data:${t.mime};base64,${t.audio_base64}`);
+        } else {
+          // Native players (iOS/Android) can't reliably play a data: URI — write
+          // the mp3 to a cache file and play the file URI instead.
+          const fileUri = `${FileSystem.cacheDirectory}chingu-tts-${Date.now()}.mp3`;
+          await FileSystem.writeAsStringAsync(fileUri, t.audio_base64, { encoding: "base64" as any });
+          setAudioUri(fileUri);
+        }
       } catch {
         setError("Could not play audio reply.");
         if (sessionActiveRef.current) setTimeout(() => { if (sessionActiveRef.current) start(); }, 600);
