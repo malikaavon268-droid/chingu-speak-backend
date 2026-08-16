@@ -30,6 +30,8 @@ const CREDITS_KEY = "chingu:credits";
 const LANGUAGE_LOCALE_KEY = "chingu:locale_target";
 const PLAY_BILLING_PRODUCT_KEY = "chingu:play_product_id";
 const ADMOB_REWARDED_KEY = "chingu:admob_rewarded_ad_unit";
+const VOICE_BY_LANG_KEY = "chingu:voice_by_lang";
+const TTS_SPEED_KEY = "chingu:tts_speed";
 
 export type Prefs = {
   from: string;
@@ -60,6 +62,8 @@ export type Prefs = {
   localeTarget: string;
   playSubscriptionProductId: string | null;
   admobRewardedAdUnitId: string | null;
+  voiceByLang: Record<string, string>;
+  ttsSpeed: number;
 };
 
 let _state: Prefs = {
@@ -91,6 +95,8 @@ let _state: Prefs = {
   localeTarget: "en",
   playSubscriptionProductId: null,
   admobRewardedAdUnitId: null,
+  voiceByLang: {},
+  ttsSpeed: 1.0,
 };
 
 const listeners: Set<() => void> = new Set();
@@ -138,6 +144,10 @@ export async function loadPrefs() {
   if (localeTarget) _state.localeTarget = localeTarget;
   if (playProductId) _state.playSubscriptionProductId = playProductId;
   if (admobRewarded) _state.admobRewardedAdUnitId = admobRewarded;
+  const vbl = await storage.getItem(VOICE_BY_LANG_KEY, "" as string);
+  if (vbl) { try { _state.voiceByLang = JSON.parse(vbl) || {}; } catch { /* keep default */ } }
+  const spd = await storage.getItem(TTS_SPEED_KEY, "" as string);
+  if (spd) { const n = parseFloat(spd); if (!Number.isNaN(n) && n > 0) _state.ttsSpeed = n; }
   emit();
 }
 
@@ -287,6 +297,14 @@ export async function setAutoVoiceReply(v: boolean) {
   await storage.setItem(AUTO_VOICE_REPLY_KEY, v ? "1" : "0");
   emit();
 }
+
+export async function setVoiceForLang(lang: string, voice: string) {
+  _state.voiceByLang = { ..._state.voiceByLang, [lang]: voice };
+  await storage.setItem(VOICE_BY_LANG_KEY, JSON.stringify(_state.voiceByLang));
+  emit();
+}
+
+export const setTtsSpeed = (v: number) => set("ttsSpeed", v, TTS_SPEED_KEY);
 
 export async function bumpStreak() {
   const today = new Date().toISOString().slice(0, 10);

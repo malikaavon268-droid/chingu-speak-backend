@@ -1,0 +1,43 @@
+{
+  "summary": "All 3 new features PASS end-to-end. BACKEND (10/10 pytest): (1) Admin Settings — GET /api/admin/settings without token -> 401; with Bearer -> 200 returning {deepgram_stt_model:'nova-2', deepgram_api_key_set:false, deepgram_api_key_masked:''} (raw key never exposed). POST /api/admin/settings {key:'deepgram_stt_model',value:'nova-2'} -> 200 {ok:true, key:'deepgram_stt_model'}; GET after write confirms persistence. POST with unsupported key 'not_allowed' -> 400 as expected. POST without token -> 401. (2) TTS explicit voice+speed — POST /api/tts {text:'Hola, encantado de conocerte', target_lang:'es', voice:'shimmer', speed:1.25} -> 200 with non-empty audio_base64 (>1KB, mime audio/mpeg). POST /api/tts with voice omitted -> 200 (server defaults from lang_voice). (3) Whisper fallback — with no Deepgram key set, POST /api/tts (en) then feeding audio_base64 into POST /api/transcribe {mime_type:'audio/mpeg',language:'en'} -> 200 with non-empty transcribed text; sent via requests (curl fallback wired in case of CF 1010, not needed on this run). FRONTEND (mobile viewport 390x844, no redbox): /voice-screen mounts with mascot + 'Tap Chingu to start the live chat'. voice-open-voice-settings taps open the picker card; all 6 voice options (nova/shimmer/alloy/echo/onyx/coral) and all 4 speed options (0.75/1/1.25/1.5) render as testIDs. Selecting Shimmer + 1.25x then Done closes the sheet cleanly; reopening shows Shimmer and 1.25x chips highlighted — persistence via prefs store confirmed. /admin-login accepts chingunadi/0644782611 and lands on /admin; admin-tab-settings opens admin-settings-panel with settings-deepgram-key, settings-deepgram-model, settings-save; typing 'nova-3' and tapping Save shows settings-msg 'Saved ✓'. Model was reset to 'nova-2' at test end to keep environment clean.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin (tabs row)", "issues": ["The 5 admin tabs (Stats/Conversations/Translations/Builds/Settings) overflow horizontally on a 390px viewport — the Settings tab is partially off-screen until the row is scrolled. Not blocking (still tappable and horizontally scrollable), but consider wrapping/flexWrap or shortening chip padding on narrow screens. Reference: /app/frontend/app/admin.tsx:162-168"]}
+    ],
+    "react_native_issues": [
+      {"component": "expo-file-system/legacy", "issue": "voice-screen.tsx still imports 'expo-file-system/legacy'. Works on SDK 54 but the legacy subpath is scheduled for removal — plan a migration to the current expo-file-system File/Directory API. Reference: /app/frontend/app/voice-screen.tsx:18"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_settings_and_voice_picker.py",
+    "/app/test_reports/pytest/pytest_iter18_admin_voice.xml",
+    "/app/test_reports/artifacts_iter/iter18_picker_open.jpeg",
+    "/app/test_reports/artifacts_iter/iter18_picker_reopen.jpeg",
+    "/app/test_reports/artifacts_iter/iter18_admin_settings_open.jpeg",
+    "/app/test_reports/artifacts_iter/iter18_admin_settings_saved.jpeg"
+  ],
+  "action_items": [
+    "No blockers. Optional: on narrow (<=390px) viewports the admin tabs row clips the last tab; consider flexWrap or a horizontal ScrollView for the tabs bar.",
+    "Optional: migrate voice-screen.tsx off 'expo-file-system/legacy' before the subpath is removed in a future Expo SDK.",
+    "Console noise on web preview (non-blocking, unchanged from iter 17): 'shadow* style props deprecated → use boxShadow', 'props.pointerEvents deprecated → use style.pointerEvents', 'Font.loadAsync patch failed'. Consider silencing the Font.loadAsync monkey-patch on web where it is a no-op."
+  ],
+  "critical_code_review_comments": [
+    "Good: /api/admin/settings never returns the raw Deepgram key — only a boolean 'set' flag and a masked tail. ADMIN_SETTABLE_KEYS is a strict allowlist and unsupported keys return 400.",
+    "Good: /api/transcribe reads the Deepgram key from db.settings each call and correctly falls back to OpenAI Whisper when unset — Whisper roundtrip decoded synthesized English audio to real text, so the fallback path is genuinely wired (not stubbed).",
+    "Good: TTS accepts optional voice+speed; when voice omitted, lang_voice(target_lang) picks per-language default and defaults to 'nova' — matches the frontend prefs contract.",
+    "Frontend voice picker correctly persists selection per target_lang via the prefs store (verified by reopening the sheet and seeing Shimmer + 1.25x still highlighted).",
+    "Admin settings save flow correctly posts SettingIn{key,value} with the admin Bearer token; the 'Saved ✓' message is driven off the 200/ok response — verified live."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_settings_and_voice_picker.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (voice picker + admin settings tab both work end-to-end)"},
+  "seed_data_creation": "None — used the existing seeded admin (chingunadi). Test set deepgram_stt_model to 'nova-3' briefly then reset to 'nova-2'. Deepgram API key remains unset (as required for Whisper-fallback validation).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression: /app/backend/tests/test_admin_settings_and_voice_picker.py (10 tests). Run with: EXPO_PUBLIC_BACKEND_URL=https://chingu-speak-backend.preview.emergentagent.com pytest /app/backend/tests/test_admin_settings_and_voice_picker.py -v. Combined with iter 17's test_voice_pipeline_and_admin.py this covers admin auth, admin stats/conversations/translations, admin settings CRUD, TTS (default + explicit voice/speed), Whisper transcribe fallback, and chat. Frontend picker/admin settings validated via Playwright on 390x844 viewport at /voice-screen and /admin-login → /admin (tab 'settings').",
+  "rca_of_issue": "N/A — no bug reproduced. All 3 requested features (Voice Language Picker, Deepgram admin settings, TTS voice+speed) work as designed on both backend and frontend."
+}

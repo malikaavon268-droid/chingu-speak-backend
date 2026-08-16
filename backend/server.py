@@ -11,6 +11,7 @@ import json
 import base64
 import logging
 import tempfile
+import requests
 import bcrypt
 import jwt
 from pathlib import Path
@@ -405,6 +406,46 @@ async def translate_image(req: ImageTranslateRequest):
 async def transcribe(req: TranscribeRequest):
     if not req.audio_base64:
         raise HTTPException(status_code=400, detail="audio_base64 is required")
+
+    # ---- Deepgram fast-path (near-instant STT) when an admin configured a key.
+    # Falls back to OpenAI Whisper below if Deepgram is absent or fails.
+    try:
+        audio_bytes_dg = base64.b64decode(req.audio_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 audio")
+
+    key_row = await db.settings.find_one({"key": "deepgram_api_key"}, {"_id": 0, "value": 1})
+    deepgram_key = (
+        str((key_row or {}).get("value") or "").strip()
+        or os.environ.get("DEEPGRAM_API_KEY", "").strip()
+    )
+    if deepgram_key:
+        try:
+            model_row = await db.settings.find_one({"key": "deepgram_stt_model"}, {"_id": 0, "value": 1})
+            deepgram_model = str((model_row or {}).get("value") or "nova-2")
+            params = [f"model={deepgram_model}", "smart_format=true", "punctuate=true"]
+            if req.language and req.language != "auto":
+                params.append(f"language={req.language.split('-')[0]}")
+            r = requests.post(
+                f"https://api.deepgram.com/v1/listen?{'&'.join(params)}",
+                headers={"Authorization": f"Token {deepgram_key}", "Content-Type": req.mime_type},
+                data=audio_bytes_dg,
+                timeout=90,
+            )
+            if r.status_code < 400:
+                payload = r.json()
+                dg_text = (
+                    ((payload.get("results") or {}).get("channels") or [{}])[0]
+                    .get("alternatives", [{}])[0]
+                    .get("transcript", "")
+                )
+                if str(dg_text).strip():
+                    return TranscribeResponse(text=str(dg_text).strip(), language=req.language)
+                # empty transcript → fall through to Whisper
+            else:
+                logger.warning("Deepgram STT failed (%s); falling back to Whisper", r.status_code)
+        except Exception:
+            logger.exception("Deepgram STT error; falling back to Whisper")
 
     # Determine extension from mime_type
     mime = req.mime_type.lower()
@@ -882,6 +923,40 @@ async def admin_recent_builds(limit: int = 20, _admin: str = Depends(require_adm
             except Exception:
                 pass
     return {"items": rows}
+
+
+# ------------------------- Admin: App Settings (LLM/STT keys) ------------------------- #
+
+ADMIN_SETTABLE_KEYS = {"deepgram_api_key", "deepgram_stt_model"}
+
+
+class SettingIn(BaseModel):
+    key: str
+    value: str
+
+
+@api_router.get("/admin/settings")
+async def admin_get_settings(_admin: str = Depends(require_admin)):
+    rows = await db.settings.find({"key": {"$in": list(ADMIN_SETTABLE_KEYS)}}, {"_id": 0}).to_list(50)
+    values = {r["key"]: r.get("value") for r in rows}
+    raw_key = str(values.get("deepgram_api_key") or "")
+    return {
+        "deepgram_stt_model": values.get("deepgram_stt_model") or "nova-2",
+        "deepgram_api_key_set": bool(raw_key.strip()),
+        "deepgram_api_key_masked": (f"••••{raw_key[-4:]}" if len(raw_key) >= 4 else ("••••" if raw_key else "")),
+    }
+
+
+@api_router.post("/admin/settings")
+async def admin_set_setting(body: SettingIn, _admin: str = Depends(require_admin)):
+    if body.key not in ADMIN_SETTABLE_KEYS:
+        raise HTTPException(status_code=400, detail="Unsupported setting key")
+    await db.settings.update_one(
+        {"key": body.key},
+        {"$set": {"key": body.key, "value": body.value.strip(), "is_public": False}},
+        upsert=True,
+    )
+    return {"ok": True, "key": body.key}
 
 
 # ------------------------- User Auth (optional) ------------------------- #

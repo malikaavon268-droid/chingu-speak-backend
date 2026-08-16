@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Linking } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Linking, TextInput } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,7 +14,7 @@ type Build = { id: string; eas_build_id: string; eas_build_url: string; status: 
 export default function Admin() {
   const router = useRouter();
   const prefs = usePrefs();
-  const [tab, setTab] = React.useState<"stats" | "conversations" | "translations" | "builds">("stats");
+  const [tab, setTab] = React.useState<"stats" | "conversations" | "translations" | "builds" | "settings">("stats");
   const [stats, setStats] = React.useState<any>(null);
   const [convs, setConvs] = React.useState<Conv[]>([]);
   const [trans, setTrans] = React.useState<HistoryItem[]>([]);
@@ -23,6 +23,13 @@ export default function Admin() {
   const [buildError, setBuildError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
+
+  const [dgModel, setDgModel] = React.useState("nova-2");
+  const [dgKeyInput, setDgKeyInput] = React.useState("");
+  const [dgKeySet, setDgKeySet] = React.useState(false);
+  const [dgMasked, setDgMasked] = React.useState("");
+  const [settingsSaving, setSettingsSaving] = React.useState(false);
+  const [settingsMsg, setSettingsMsg] = React.useState<string | null>(null);
 
   React.useEffect(() => { loadPrefs(); }, []);
 
@@ -88,6 +95,41 @@ export default function Admin() {
     if (tab === "builds") { refreshBuilds(); }
   }, [tab, refreshBuilds]);
 
+  const loadSettings = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      const s = await api.adminGetSettings(token);
+      setDgModel(s.deepgram_stt_model || "nova-2");
+      setDgKeySet(!!s.deepgram_api_key_set);
+      setDgMasked(s.deepgram_api_key_masked || "");
+    } catch (e: any) {
+      setSettingsMsg(String(e?.message || e));
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    if (tab === "settings") { loadSettings(); }
+  }, [tab, loadSettings]);
+
+  const onSaveSettings = async () => {
+    if (!token || settingsSaving) return;
+    setSettingsSaving(true);
+    setSettingsMsg(null);
+    try {
+      await api.adminSaveSetting(token, "deepgram_stt_model", dgModel.trim() || "nova-2");
+      if (dgKeyInput.trim()) {
+        await api.adminSaveSetting(token, "deepgram_api_key", dgKeyInput.trim());
+        setDgKeyInput("");
+      }
+      await loadSettings();
+      setSettingsMsg("Saved ✓");
+    } catch (e: any) {
+      setSettingsMsg(String(e?.message || e));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
   const onTriggerBuild = async () => {
     if (!token || buildLoading) return;
     setBuildLoading(true);
@@ -117,13 +159,18 @@ export default function Admin() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.tabsRow}>
-          {(["stats", "conversations", "translations", "builds"] as const).map((t) => (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabsScroll}
+          contentContainerStyle={styles.tabsRow}
+        >
+          {(["stats", "conversations", "translations", "builds", "settings"] as const).map((t) => (
             <TouchableOpacity key={t} testID={`admin-tab-${t}`} style={[styles.tabChip, tab === t && styles.tabChipActive]} onPress={() => setTab(t)}>
               <Text style={[styles.tabChipText, tab === t && styles.tabChipTextActive]}>{t.charAt(0).toUpperCase() + t.slice(1)}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
 
         {loading ? (
           <View style={styles.loadingBox}><ActivityIndicator color="#5B7CFA" size="large" /></View>
@@ -209,7 +256,7 @@ export default function Admin() {
               </View>
             )}
           />
-        ) : (
+        ) : tab === "builds" ? (
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
             <View style={buildStyles.heroCard}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
@@ -271,11 +318,75 @@ export default function Admin() {
               ))
             )}
           </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} testID="admin-settings-panel">
+            <View style={buildStyles.heroCard}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                <View style={buildStyles.heroIcon}><Ionicons name="mic" size={20} color="#A78BFA" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={buildStyles.heroTitle}>Deepgram Speech-to-Text</Text>
+                  <Text style={buildStyles.heroSub}>Add your Deepgram key for near-instant transcription. If empty, the app uses Whisper.</Text>
+                </View>
+              </View>
+              <Text style={settingsStyles.status}>
+                {dgKeySet ? `Key configured (${dgMasked})` : "No key set — using Whisper fallback"}
+              </Text>
+            </View>
+
+            <Text style={styles.section}>Deepgram API Key</Text>
+            <TextInput
+              testID="settings-deepgram-key"
+              style={settingsStyles.input}
+              placeholder={dgKeySet ? "Enter a new key to replace the current one" : "Paste your Deepgram API key"}
+              placeholderTextColor="#B9B2CC"
+              value={dgKeyInput}
+              onChangeText={setDgKeyInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+
+            <Text style={[styles.section, { marginTop: 18 }]}>STT Model</Text>
+            <TextInput
+              testID="settings-deepgram-model"
+              style={settingsStyles.input}
+              placeholder="nova-2"
+              placeholderTextColor="#B9B2CC"
+              value={dgModel}
+              onChangeText={setDgModel}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <TouchableOpacity
+              testID="settings-save"
+              style={[buildStyles.heroBtn, { marginTop: 22 }, settingsSaving && { opacity: 0.5 }]}
+              onPress={onSaveSettings}
+              disabled={settingsSaving}
+              activeOpacity={0.85}
+            >
+              {settingsSaving ? <ActivityIndicator color="#F5F1FF" size="small" /> : <Ionicons name="save" size={16} color="#F5F1FF" />}
+              <Text style={buildStyles.heroBtnText}>{settingsSaving ? "Saving…" : "Save Settings"}</Text>
+            </TouchableOpacity>
+            {settingsMsg && (
+              <Text testID="settings-msg" style={{ color: settingsMsg === "Saved ✓" ? "#34D399" : "#FCA5A5", fontSize: 12, marginTop: 12, fontWeight: "700" }}>{settingsMsg}</Text>
+            )}
+            <Text style={settingsStyles.help}>Get a free key at deepgram.com → Console → API Keys. It’s stored securely on your backend and never shown again.</Text>
+          </ScrollView>
         )}
       </SafeAreaView>
     </View>
   );
 }
+
+const settingsStyles = StyleSheet.create({
+  status: { color: "#8B7AA6", fontSize: 12, fontWeight: "700", marginTop: 4 },
+  input: {
+    backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#EFE8FC", borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: "#1F1A2E",
+  },
+  help: { color: "#9CA3AF", fontSize: 11, marginTop: 16, lineHeight: 16 },
+});
 
 function ExportBtn({ label, onPress, testID }: any) {
   return (
@@ -317,8 +428,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 8 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
   title: { color: "#1F1A2E", fontSize: 18, fontWeight: "700" },
-  tabsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20, marginVertical: 12 },
-  tabChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  tabsScroll: { flexGrow: 0, marginVertical: 12 },
+  tabsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20 },
+  tabChip: { flexShrink: 0, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   tabChipActive: { backgroundColor: "#5B7CFA", borderColor: "#5B7CFA" },
   tabChipText: { color: "#9CA3AF", fontSize: 12, fontWeight: "600" },
   tabChipTextActive: { color: "#1F1A2E" },

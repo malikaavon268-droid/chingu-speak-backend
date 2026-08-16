@@ -278,6 +278,19 @@ const live = {
       headers: { Authorization: `Bearer ${token}` },
     }),
 
+  adminGetSettings: (token: string) =>
+    request<{ deepgram_stt_model: string; deepgram_api_key_set: boolean; deepgram_api_key_masked: string }>(
+      "/admin/settings",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ),
+
+  adminSaveSetting: (token: string, key: string, value: string) =>
+    request<{ ok: boolean; key: string }>("/admin/settings", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ key, value }),
+    }),
+
   ping: () => request<{ status: string; service?: string; ts?: string }>("/ping"),
 
   deleteAccount: (token: string | null) =>
@@ -367,4 +380,8 @@ export const api = {
     MOCK_API_ENABLED ? mocks.adminTriggerBuild() : live.adminTriggerBuild(...args),
   adminRecentBuilds: (...args: Parameters<typeof live.adminRecentBuilds>) =>
     MOCK_API_ENABLED ? mocks.adminRecentBuilds() : live.adminRecentBuilds(...args),
+  adminGetSettings: (...args: Parameters<typeof live.adminGetSettings>) =>
+    live.adminGetSettings(...args),
+  adminSaveSetting: (...args: Parameters<typeof live.adminSaveSetting>) =>
+    live.adminSaveSetting(...args),
 };

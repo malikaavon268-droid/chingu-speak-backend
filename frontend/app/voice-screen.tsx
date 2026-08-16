@@ -8,6 +8,7 @@ import {
   Image,
   Animated,
   ScrollView,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -19,7 +20,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 
 import { api } from "@/src/api/client";
-import { usePrefs, swapLangs, loadPrefs, bumpStreak, setCredits } from "@/src/state/prefs";
+import { usePrefs, swapLangs, loadPrefs, bumpStreak, setCredits, setVoiceForLang, setTtsSpeed } from "@/src/state/prefs";
 import { chinguIdleMascot, chinguActiveMascot, heartIcon, theme } from "@/src/theme";
 import AnimatedWaveform from "@/src/components/AnimatedWaveform";
 import FloatingMascot from "@/src/components/FloatingMascot";
@@ -49,6 +50,22 @@ const MOCK_LISTEN_MS = 1800;
 const MAX_LOG_TURNS = 8;
 const VISIBLE_LOG_TURNS = 3;
 
+// OpenAI TTS voices the user can assign to Chingu (per practice language).
+const VOICE_OPTIONS: { id: string; label: string }[] = [
+  { id: "nova", label: "Nova" },
+  { id: "shimmer", label: "Shimmer" },
+  { id: "alloy", label: "Alloy" },
+  { id: "echo", label: "Echo" },
+  { id: "onyx", label: "Onyx" },
+  { id: "coral", label: "Coral" },
+];
+const SPEED_OPTIONS: { value: number; label: string }[] = [
+  { value: 0.75, label: "0.75×" },
+  { value: 1.0, label: "1×" },
+  { value: 1.25, label: "1.25×" },
+  { value: 1.5, label: "1.5×" },
+];
+
 type Turn = { id: string; user: string; chingu: string; ts: number };
 
 export default function VoiceScreen() {
@@ -64,6 +81,7 @@ export default function VoiceScreen() {
   const [error, setError] = React.useState<string | null>(null);
   const [audioUri, setAudioUri] = React.useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [showVoicePicker, setShowVoicePicker] = React.useState(false);
 
   const sessionIdRef = React.useRef<string>("");
   const sessionActiveRef = React.useRef(false);
@@ -319,7 +337,8 @@ export default function VoiceScreen() {
       }
 
       try {
-        const t = await api.tts({ text: chinguText, target_lang: prefs.to, app_locale: prefs.appLang });
+        const chosenVoice = prefs.voiceByLang?.[prefs.to];
+        const t = await api.tts({ text: chinguText, target_lang: prefs.to, voice: chosenVoice || undefined, speed: prefs.ttsSpeed || 1.0, app_locale: prefs.appLang });
         if (typeof (t as any).credits === "number") await setCredits((t as any).credits);
         if (Platform.OS === "web") {
           setAudioUri(`data:${t.mime};base64,${t.audio_base64}`);
@@ -341,7 +360,7 @@ export default function VoiceScreen() {
       setSessionActive(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recorder, prefs.from, prefs.to, prefs.appLang]);
+  }, [recorder, prefs.from, prefs.to, prefs.appLang, prefs.ttsSpeed, prefs.voiceByLang]);
 
   // Native VAD: while listening with an active session, watch the meter.
   React.useEffect(() => {
@@ -449,9 +468,14 @@ export default function VoiceScreen() {
             <Ionicons name="chevron-back" size={22} color={theme.text} />
           </TouchableOpacity>
           <Text style={styles.title}>{t("voiceChat")}</Text>
-          <TouchableOpacity testID="voice-swap-langs" style={styles.topIcon} onPress={swapLangs}>
-            <Ionicons name="swap-horizontal" size={18} color={theme.text} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity testID="voice-open-voice-settings" style={styles.topIcon} onPress={() => setShowVoicePicker(true)}>
+              <Ionicons name="options-outline" size={18} color={theme.text} />
+            </TouchableOpacity>
+            <TouchableOpacity testID="voice-swap-langs" style={styles.topIcon} onPress={swapLangs}>
+              <Ionicons name="swap-horizontal" size={18} color={theme.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.centerArea}>
@@ -573,6 +597,69 @@ export default function VoiceScreen() {
           </DraggableSheet>
         ) : null}
       </SafeAreaView>
+
+      <Modal
+        visible={showVoicePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowVoicePicker(false)}
+      >
+        <TouchableOpacity
+          testID="voice-picker-backdrop"
+          activeOpacity={1}
+          style={styles.modalBackdrop}
+          onPress={() => setShowVoicePicker(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.modalCard} testID="voice-picker-card">
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Chingu&apos;s Voice</Text>
+            <Text style={styles.modalSub}>For {prefs.to?.toUpperCase() || "current language"} · saved per language</Text>
+
+            <Text style={styles.modalLabel}>VOICE</Text>
+            <View style={styles.chipWrap}>
+              {VOICE_OPTIONS.map((v) => {
+                const active = (prefs.voiceByLang?.[prefs.to] || "") === v.id;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    testID={`voice-option-${v.id}`}
+                    style={[styles.pickChip, active && styles.pickChipActive]}
+                    onPress={() => { setVoiceForLang(prefs.to, v.id); if (Platform.OS !== "web") Haptics.selectionAsync(); }}
+                  >
+                    <Text style={[styles.pickChipText, active && styles.pickChipTextActive]}>{v.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={[styles.modalLabel, { marginTop: 18 }]}>SPEED</Text>
+            <View style={styles.chipWrap}>
+              {SPEED_OPTIONS.map((s) => {
+                const active = (prefs.ttsSpeed || 1.0) === s.value;
+                return (
+                  <TouchableOpacity
+                    key={s.value}
+                    testID={`voice-speed-${s.value}`}
+                    style={[styles.pickChip, active && styles.pickChipActive]}
+                    onPress={() => { setTtsSpeed(s.value); if (Platform.OS !== "web") Haptics.selectionAsync(); }}
+                  >
+                    <Text style={[styles.pickChipText, active && styles.pickChipTextActive]}>{s.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              testID="voice-picker-done"
+              style={styles.modalDoneBtn}
+              onPress={() => setShowVoicePicker(false)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.modalDoneText}>Done</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -687,4 +774,29 @@ const styles = StyleSheet.create({
   },
 
   error: { color: "#EF4444", marginTop: 8, fontSize: 12, fontWeight: "700" },
+
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(31,26,46,0.35)", justifyContent: "flex-end" },
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingHorizontal: 22, paddingTop: 12, paddingBottom: 32,
+  },
+  modalHandle: { alignSelf: "center", width: 44, height: 5, borderRadius: 3, backgroundColor: "#E6DFFC", marginBottom: 14 },
+  modalTitle: { color: "#1F1A2E", fontSize: 20, fontWeight: "900" },
+  modalSub: { color: "#8B7AA6", fontSize: 12, fontWeight: "600", marginTop: 2, marginBottom: 8 },
+  modalLabel: { color: "#A78BFA", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12, marginBottom: 10 },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  pickChip: {
+    paddingHorizontal: 16, height: 40, borderRadius: 20,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "#F5F1FF", borderWidth: 1, borderColor: "#EFE8FC",
+  },
+  pickChipActive: { backgroundColor: "#8B5CF6", borderColor: "#8B5CF6" },
+  pickChipText: { color: "#6B6585", fontSize: 13, fontWeight: "700" },
+  pickChipTextActive: { color: "#FFFFFF" },
+  modalDoneBtn: {
+    marginTop: 24, height: 52, borderRadius: 16, backgroundColor: "#1F1A2E",
+    alignItems: "center", justifyContent: "center",
+  },
+  modalDoneText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
 });
