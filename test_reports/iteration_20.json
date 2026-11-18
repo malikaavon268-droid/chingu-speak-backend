@@ -1,0 +1,34 @@
+{
+  "summary": "Tested the new APInex Chingu AI reply integration (backend only). /api/chat now uses APInex (api.apinex.bond, model free/gpt-6-luna) as primary engine with Gemini fallback. Verified via direct API calls + log inspection + code review + full regression pytest suite (92 tests).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A - pre-existing", "issue": "test_emergent_preview_routing.py fails on 2 tests because /app/frontend/eas.json does not exist (unrelated to this APInex change, pre-existing gap from earlier iterations)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/pytest_results_iter20.xml"
+  ],
+  "action_items": [
+    "Optional: restore/add /app/frontend/eas.json (or update test_emergent_preview_routing.py) to resolve 2 unrelated pre-existing test failures - not caused by this iteration's change.",
+    "No action needed for the APInex integration itself - working as expected."
+  ],
+  "critical_code_review_comments": [
+    "apinex_llm.py: clean implementation, correctly raises on empty key/empty response/network error so caller can fall back; retry with backoff (1 retry) is reasonable.",
+    "server.py chat_buddy(): apinex_configured() gate + try/except correctly falls back to stream_llm_text(get_llm) on any APInex exception, and engine_used label is logged accurately ('Chingu chat reply generated via apinex' vs gemini) - confirms correct primary/fallback wiring.",
+    "No business logic touched in translate/tts/transcribe/pronounce-score paths - confirmed via regression suite, all passing."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "98% (90/92 tests passed; 2 unrelated pre-existing failures)", "frontend": "not tested this iteration (backend-only change, frontend chat UI unaffected per scope)"},
+  "seed_data_creation": "Created TEST_ prefixed chat sessions (TEST_sess_*) via /api/chat for verification; these are isolated test session_ids in db.chat_sessions and do not affect production data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "APInex integration verified working end-to-end: POST /api/chat returns HTTP 200 with non-empty reply for both no practice_lang and practice_lang='ko' cases; backend logs confirmed 'Chingu chat reply generated via apinex' for all test calls (APINEX_API_KEY is present at runtime via secrets injection, not visible in backend/.env file directly - this is expected/by design). Fallback code path (apinex fails -> Gemini via stream_llm_text/get_llm) reviewed and is correctly implemented, not force-broken to test live since APINEX_API_KEY is live. Full regression pytest suite run (92 tests): 90 passed, 2 failed due to pre-existing missing /app/frontend/eas.json file (unrelated to this change - was already failing before this iteration based on file absence, not a result of apinex work). Admin login, admin settings, translate, translate-image, tts, transcribe, pronounce-score, chat history persistence, languages, health/ping all passing.",
+  "rca_of_issue": "N/A - no RCA needed, feature working as intended. The eas.json failures are a pre-existing gap: file simply does not exist in frontend directory; test_emergent_preview_routing.py expects it for EAS build profile validation, unrelated to the APInex chat scope of this review."
+}

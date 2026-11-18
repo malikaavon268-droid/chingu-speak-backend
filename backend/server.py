@@ -24,6 +24,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from emergentintegrations.llm.openai.text_to_speech import OpenAITextToSpeech
 from emergentintegrations.llm.openai.speech_to_text import OpenAISpeechToText
 from llm_utils import stream_llm_text
+from apinex_llm import apinex_chat_reply, apinex_configured
 
 
 ROOT_DIR = Path(__file__).parent
@@ -610,16 +611,27 @@ async def chat_buddy(req: ChatRequest):
         context_str += f"{role}: {m['content']}\n"
     prompt = (context_str + f"User: {req.message}\nChingu:").strip()
 
-    try:
-        reply = await stream_llm_text(
-            lambda: get_llm(session_id=req.session_id, system_message=system),
-            UserMessage(text=prompt),
-        )
-    except Exception as e:
-        logger.exception("Chat failed")
-        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
+    reply = None
+    engine_used = "gemini"
+    if apinex_configured():
+        try:
+            reply = await apinex_chat_reply(system, prompt)
+            engine_used = "apinex"
+        except Exception as e:
+            logger.warning("APInex chat reply failed, falling back to Gemini: %s", e)
+
+    if reply is None:
+        try:
+            reply = await stream_llm_text(
+                lambda: get_llm(session_id=req.session_id, system_message=system),
+                UserMessage(text=prompt),
+            )
+        except Exception as e:
+            logger.exception("Chat failed")
+            raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
 
     reply = reply.strip()
+    logger.info("Chingu chat reply generated via %s", engine_used)
 
     # Save updated history
     new_messages = messages + [
