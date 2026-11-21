@@ -1,9 +1,7 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { usePrefs, setCredits, setIsPro } from "@/src/state/prefs";
@@ -12,7 +10,6 @@ import SubscriptionCard from "@/src/components/SubscriptionCard";
 import AppBackButton from "@/src/components/AppBackButton";
 
 export default function Paywall() {
-  const router = useRouter();
   const prefs = usePrefs();
   const [rewardLoading, setRewardLoading] = React.useState(false);
   const [subLoading, setSubLoading] = React.useState(false);
@@ -52,7 +49,16 @@ export default function Paywall() {
       await setIsPro(true);
       Alert.alert("Pro activated", "Subscription status updated.");
     } catch (err: any) {
-      Alert.alert("Activation failed", err?.message || "Could not activate subscription.");
+      // The backend returns a JSON body ({"detail": "..."}); surface that
+      // human-readable message instead of the raw JSON text.
+      let message = "Could not activate subscription.";
+      try {
+        const parsed = JSON.parse(err?.message || "");
+        message = parsed?.detail || message;
+      } catch {
+        message = err?.message || message;
+      }
+      Alert.alert("Subscriptions coming soon", message);
     } finally {
       setSubLoading(false);
     }
@@ -82,18 +88,6 @@ export default function Paywall() {
             loading={subLoading}
             onSubscribe={onSubscribe}
           />
-
-          <TouchableOpacity
-            testID="paywall-pro-toggle-button"
-            style={styles.secondaryBtn}
-            onPress={async () => {
-              await setIsPro(true);
-              router.back();
-            }}
-          >
-            <Ionicons name="sparkles" size={16} color="#6B6585" />
-            <Text style={styles.secondaryText}>Use current test Pro mode</Text>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -115,13 +109,4 @@ const styles = StyleSheet.create({
   balanceSub: { color: "#6B6585", fontSize: 12, fontWeight: "600" },
   balanceTitle: { color: "#1F1A2E", fontSize: 24, fontWeight: "900", marginTop: 3 },
   proActive: { color: "#10B981", fontSize: 12, fontWeight: "700", marginTop: 4 },
-  secondaryBtn: {
-    marginTop: 4,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 10,
-  },
-  secondaryText: { color: "#6B6585", fontSize: 12, fontWeight: "700" },
 });

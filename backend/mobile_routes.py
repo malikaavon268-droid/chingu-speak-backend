@@ -686,28 +686,20 @@ def register_mobile_routes(app, db):
         return {"items": rows}
 
     # ---------- Subscriptions ----------
+    # NOTE: real Google Play / Apple receipt verification is NOT wired up yet
+    # (RevenueCat integration was deferred by the user). Until it is, this
+    # endpoint must NOT blindly trust whatever product_id/purchase_token the
+    # client sends — that was a "test mode" shortcut that let anyone grant
+    # themselves free Pro. It now refuses until real verification exists.
     @mobile_router.post("/subscriptions/verify")
     async def subscriptions_verify(body: SubscriptionVerifyIn, creds: HTTPAuthorizationCredentials = Depends(user_bearer)):
         user = await get_optional_user(db, creds)
         if not user:
             raise HTTPException(status_code=401, detail="Missing or invalid token")
-        await db.user_subscriptions.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": user["id"],
-            "platform": "google_play",
-            "product_id": body.product_id,
-            "purchase_token": body.purchase_token,
-            "package_name": body.package_name,
-            "status": "active",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        await db.users.update_one({"id": user["id"]}, {"$set": {"is_pro": True}})
-        return {
-            "ok": True,
-            "status": "active",
-            "product_id": body.product_id,
-            "verification": "pending-server-verification",
-        }
+        raise HTTPException(
+            status_code=503,
+            detail="Subscriptions are not available yet — real purchase verification isn't connected. Please try again later.",
+        )
 
     # ---------- AI module content ----------
     @mobile_router.post("/modules/content")
