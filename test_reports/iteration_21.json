@@ -1,0 +1,51 @@
+{
+  "summary": "Reviewed the voice-screen.tsx TTS/audio-playback fix (expo-audio@58.0.12 API usage, resetAudioModeForPlayback, event-driven useAudioPlayerStatus, [ChinguVoice] logs, error toast). Full backend regression re-run (92 tests). Frontend automated testing was limited to code review + web-preview UI interaction per the known headless-Chromium mic/speaker limitation (acknowledged, not treated as a bug). Found one real, reproducible frontend bug unrelated to the mic/speaker limitation: the result sheet overlay blocks taps on the mascot/stop button once a voice session is active.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A - pre-existing", "issue": "test_emergent_preview_routing.py: 2 tests fail because /app/frontend/eas.json is missing. Pre-existing gap from earlier iterations, unrelated to this voice-screen change."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "voice-screen.tsx (DraggableSheet result sheet vs mascot button)",
+        "issue": "Once a voice session starts (sessionActive=true), the 'CHINGU LIVE CHAT' bottom sheet renders immediately (showSheet = sessionActive || turns.length > 0) and its peek area visually/physically overlaps the mascot button region on a 375x667 viewport. Confirmed via elementFromPoint that the DOM node at the mascot's center coordinates is the sheet's empty-hint text, not the TouchableOpacity testID='voice-mascot-stop'. Both a Playwright force=True click and a normal click on 'voice-mascot-stop' fail to end the session (click is intercepted/misrouted to the sheet). Reproduced 3x consistently. This means the tap-to-end-session gesture can be unreliable whenever the sheet's peek height overlaps the mascot hit area — this is pre-existing layout, not introduced by this iteration's audio fix, but it directly blocks the 'tap Chingu again to end' UX the hint text promises.",
+        "testID": "voice-mascot-stop / voice-result-sheet",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "voice-screen.tsx", "issues": ["Result sheet peekHeight(300) overlaps the mascot touch target at mobile viewport 375x667 — consider reducing peek height or adding pointerEvents='box-none' passthrough on empty areas of the sheet while session is active with 0 turns."]}
+    ],
+    "react_native_issues": []
+  },
+  "code_review_findings": {
+    "expo_audio_api_correctness": "PASS — Verified against installed expo-audio@58.0.12 source (node_modules/expo-audio/src/Audio.types.ts, AudioModule.types.ts, ExpoAudio.ts). All fields used in resetAudioModeForPlayback (playsInSilentMode, interruptionMode:'duckOthers', shouldRouteThroughEarpiece:false, allowsRecording:false, shouldPlayInBackground:false) exist on AudioMode type with matching types/defaults. useAudioPlayerStatus(player) returns AudioStatus with isLoaded/error/playing/duration fields exactly as used. player.play()/player.seekTo(seconds)/player.volume all match AudioPlayer class signature. No deprecated expo-av/expo-speech imports present — only expo-audio.",
+    "play_gating_logic": "PASS — Confirmed two coordinated useEffects: (1) sets pendingPlayRef.current=true + calls resetAudioModeForPlayback('pre-play') when audioUri changes, (2) only calls player.play() once playerStatus.isLoaded is true, guarded by pendingPlayRef so play() never fires twice for the same source. A 6s diagnostic timeout warns if loading stalls.",
+    "logging_and_toast_wiring": "PASS — All pipeline stages log with '[ChinguVoice]' prefix (recording started, recorder.stop() ok, audio mode -> playback/speaker, transcribed text, chat reply, /api/tts ok, player.play() called). Backend failures (transcribe/chat/tts) are tagged '(backend)' in both console.error and showToast(); frontend playback failures (playerStatus.error, player.play() throw, stalled load) are tagged '(frontend)'. showToast() syncs into the existing `error` state for the result-sheet text as designed. Confirmed 'recording started' fires in the live web preview console log.",
+    "typescript_eslint": "Re-ran tsc --noEmit and expo lint. No NEW errors attributable to this change: the 2 tsc errors inside voice-screen.tsx (ScrollView.scrollToEnd ref typing) and all 28 eslint react-hooks/refs errors are PRE-EXISTING — confirmed by diffing against HEAD~1 (pre-existing errors: 24; errors now: 28, but the 4 new eslint flags are all on NEW useEffect lines that merely read playerStatus/player (not literal useRef values) and are false positives from the experimental react-hooks/refs rule, consistent with it already flagging unrelated pre-existing Animated.Value refs (pulseScale/pulseY/listeningPulse/sessionGlow/thinkingPulse) elsewhere in the same file before this change. Not a regression worth blocking on."
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/pytest_results_iter21.xml"
+  ],
+  "action_items": [
+    "Fix overlay/touch-blocking: when sessionActive=true, the DraggableSheet intercepts taps meant for the mascot stop button at mobile viewport sizes — reduce peekHeight, raise mascot z-index, or make empty-sheet areas pointerEvents='box-none' so the mascot stays tappable to end a session.",
+    "CANNOT be verified from this environment: real mic → real speaker playback on a physical device. Headless Chromium auto-grants mic permission but its audio metering never reports non-silence, so the VAD-based stop() never fires and the transcribe → chat → tts → play() pipeline cannot be exercised end-to-end here. User must verify audio actually plays through the loud speaker on a real Expo Go SDK 58 device.",
+    "Optional: restore /app/frontend/eas.json or adjust test_emergent_preview_routing.py (pre-existing gap, unrelated to this task).",
+    "Optional/low priority: experimental eslint react-hooks/refs rule produces false positives on expo-audio SharedObject reads (player/playerStatus) and Animated.Value refs throughout voice-screen.tsx — consider disabling that rule for this file or upgrading eslint-plugin-react-hooks if it causes CI friction, though it does not reflect a real runtime bug."
+  ],
+  "critical_code_review_comments": [
+    "Audio.types.ts / AudioModule.types.ts confirm every field/method used in voice-screen.tsx's resetAudioModeForPlayback(), useAudioPlayerStatus(), and player.play()/seekTo()/volume calls are valid for expo-audio@58.0.12 — no deprecated or non-existent API usage found.",
+    "The dual resetAudioModeForPlayback() calls (post-record + pre-play) are a reasonable defensive pattern against focus loss during the network round-trip; cannot be verified to actually route audio to the loud speaker without a physical device, as noted in the task caveat.",
+    "showToast()/error-kind sync logic is correctly implemented and testable (confirmed toast/dismiss testIDs exist in JSX: voice-toast, voice-toast-dismiss) but could not be triggered in this run because no real backend/frontend failure occurred during the limited mocked interaction — only verified by static code read, not a live trigger."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "98% (90/92 passed; 2 unrelated pre-existing eas.json-dependent failures)", "frontend": "Code review: PASS. UI interaction testing: 1 new bug found (sheet overlay blocks mascot tap once session active) — real mic/speaker pipeline NOT verifiable in this environment per documented limitation."},
+  "seed_data_creation": "None — used existing public endpoints only, no persistent test data created this run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "voice-screen.tsx's expo-audio API usage (setAudioModeAsync fields, useAudioPlayerStatus, play/seekTo/volume) was verified byte-for-byte against node_modules/expo-audio/src/{Audio.types.ts,AudioModule.types.ts,ExpoAudio.ts} for v58.0.12 — all correct, no deprecated APIs. Backend regression: 90/92 passing (same 2 pre-existing eas.json failures from iteration 20, untouched by this change). Found and reproduced (3x) a REAL frontend bug: once a voice session starts, the DraggableSheet result sheet ('CHINGU LIVE CHAT') visually and functionally overlaps the mascot button hit-area on a 375x667 mobile viewport, so tapping the mascot again to end the session does not register (confirmed via elementFromPoint that the sheet's empty-hint text node sits on top of the mascot at the click coordinates, and both force and normal Playwright clicks failed to flip sessionActive back to false). This is pre-existing layout (DraggableSheet/peekHeight), not something this iteration's audio-mode/toast change introduced, but it blocks the exact UX ('Tap Chingu again to end') the screen advertises and should be fixed. Could NOT verify the actual real-device audio playback fix (mic→speaker) since headless Chromium never reports non-silence metering, so recorder.stop() via VAD never auto-fires and the full transcribe→chat→tts→play() pipeline never executes in this environment — this requires the user's physical Expo Go SDK 58 device as previously agreed.",
+  "rca_of_issue": "Mascot-tap-to-end bug: showSheet = sessionActive || turns.length > 0, so the sheet mounts as soon as a session starts (even with 0 turns, showing 'Say something to Chingu...' empty hint) with peekHeight=300 on a 667px-tall mobile viewport — its rendered top edge sits above/overlapping the 220x220 mascot touch target positioned in centerArea (flex:1, justifyContent:center). Because the sheet is a later sibling in the component tree (absolutely positioned on top via DraggableSheet internals) it wins the browser's native hit-test at that pixel, so clicks dispatched at the mascot's visual center are delivered to the sheet's content instead of the TouchableOpacity underneath, even with Playwright's force=True (force bypasses Playwright's own actionability checks but the browser still performs real hit-testing at the click coordinate). Mitigation: shrink the mascot's effective hit-test priority conflict by either (a) reducing peekHeight while sessionActive && turns.length===0, (b) raising the mascot's own zIndex/elevation above the sheet, or (c) setting pointerEvents='box-none' on the sheet's empty/translucent regions so only its visible content (not its full bounding box) intercepts touches."
+}

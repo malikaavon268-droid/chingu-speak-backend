@@ -15,7 +15,14 @@ import { useRouter } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
-import { useAudioRecorder, useAudioRecorderState, useAudioPlayer, AudioModule, RecordingPresets } from "expo-audio";
+import {
+  useAudioRecorder,
+  useAudioRecorderState,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+  AudioModule,
+  RecordingPresets,
+} from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 
@@ -74,6 +81,13 @@ function scoreColor(s: number) {
 }
 
 type Turn = { id: string; user: string; chingu: string; ts: number; score?: number; tip?: string };
+type VoiceToast = { id: number; message: string; kind: "error" | "info" };
+
+// Prefix every diagnostic log from this screen so it's easy to filter in
+// Metro / device logs (`adb logcat` or the Expo CLI terminal) when diagnosing
+// a silent voice-reply issue — tells us at a glance whether the failure is
+// backend (transcribe/chat/tts request) or frontend (audio session/playback).
+const VLOG = "[ChinguVoice]";
 
 export default function VoiceScreen() {
   const router = useRouter();
@@ -90,6 +104,7 @@ export default function VoiceScreen() {
   const [audioUri, setAudioUri] = React.useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [showVoicePicker, setShowVoicePicker] = React.useState(false);
+  const [toast, setToast] = React.useState<VoiceToast | null>(null);
 
   const sessionIdRef = React.useRef<string>("");
   const sessionActiveRef = React.useRef(false);
@@ -99,6 +114,8 @@ export default function VoiceScreen() {
   const mockListenTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasSpeakingRef = React.useRef(false);
   const logScrollRef = React.useRef<ScrollView | null>(null);
+  const pendingPlayRef = React.useRef(false);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pulseScale = React.useRef(new Animated.Value(1)).current;
   const pulseY = React.useRef(new Animated.Value(0)).current;
@@ -110,19 +127,64 @@ export default function VoiceScreen() {
   const thinkingLoopRef = React.useRef<Animated.CompositeAnimation | null>(null);
 
   const player = useAudioPlayer(audioUri ? { uri: audioUri } : null);
+  const playerStatus = useAudioPlayerStatus(player);
+
+  // Shows a short-lived banner (visible regardless of the result-sheet scroll
+  // position) and mirrors the same message into the existing `error` text so
+  // both surfaces stay in sync. `kind` is included in the message text itself
+  // so a glance at the banner tells us whether to look at the backend TTS
+  // endpoint or the native playback/audio-session code.
+  const showToast = React.useCallback((message: string, kind: VoiceToast["kind"] = "info") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ id: Date.now(), message, kind });
+    if (kind === "error") setError(message);
+    toastTimerRef.current = setTimeout(() => setToast(null), 4500);
+  }, []);
+
+  // Out-of-recording, speaker-routed playback mode. Called right after the
+  // recorder stops AND again right before `player.play()` fires, so the
+  // audio session is guaranteed to be in the correct state even if something
+  // else (an incoming call, another app) reclaimed focus while we awaited
+  // the transcribe/chat/TTS network calls in between.
+  const resetAudioModeForPlayback = React.useCallback(async (label: string) => {
+    if (MOCK_WEB) return;
+    try {
+      await AudioModule.setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        shouldRouteThroughEarpiece: false,
+        interruptionMode: "duckOthers",
+      });
+      console.log(`${VLOG} audio mode -> playback/speaker (${label})`);
+    } catch (e) {
+      console.warn(`${VLOG} audio mode reset FAILED (${label}):`, e);
+    }
+  }, []);
 
   React.useEffect(() => { sessionActiveRef.current = sessionActive; }, [sessionActive]);
   React.useEffect(() => { stageRef.current = stage; }, [stage]);
   React.useEffect(() => { loadPrefs(); }, []);
 
-  // Poll the audio player so we can pivot mascot state on TTS playback.
+  // Mirror the player's real status (event-driven, from the native layer)
+  // into `isSpeaking` instead of polling — this also lets us react to
+  // `isLoaded` and `error` precisely instead of guessing with a timer.
   React.useEffect(() => {
-    const id = setInterval(() => {
-      const playing = Boolean((player as any)?.playing);
-      setIsSpeaking(playing);
-    }, 200);
-    return () => clearInterval(id);
-  }, [player]);
+    setIsSpeaking(Boolean(playerStatus?.playing));
+  }, [playerStatus?.playing]);
+
+  // Surface any native playback error immediately — this is the frontend
+  // half of the diagnosis: if this fires, the backend already returned
+  // audio fine (reached setAudioUri) and the problem is in the device's
+  // audio session / file playback, not the TTS API.
+  React.useEffect(() => {
+    if (playerStatus?.error) {
+      console.error(`${VLOG} player status error (frontend playback):`, playerStatus.error);
+      showToast(`Playback failed (frontend): ${playerStatus.error}`, "error");
+      pendingPlayRef.current = false;
+    }
+  }, [playerStatus?.error, showToast]);
+
 
   // Mascot pulse loop only while Chingu is actively speaking.
   React.useEffect(() => {
@@ -150,35 +212,52 @@ export default function VoiceScreen() {
     }
   }, [isSpeaking, pulseScale, pulseY]);
 
-  // Start audio playback once the TTS URI is set.
+  // A new TTS file arrived — reset the audio session to speaker/playback
+  // mode and mark a play as pending. The actual `player.play()` call fires
+  // from the status effect below once expo-audio reports `isLoaded`, so we
+  // never call play() on a source that hasn't finished loading yet (which
+  // can silently no-op on some Android/iOS builds).
   React.useEffect(() => {
     if (audioUri && player) {
-      (async () => {
-        try {
-          // iOS/Android: leave record mode and force the LOUD speaker (not the
-          // earpiece), otherwise Chingu's reply is near-silent after recording.
-          if (!MOCK_WEB) {
-            await AudioModule.setAudioModeAsync({
-              allowsRecording: false,
-              playsInSilentMode: true,
-              shouldPlayInBackground: false,
-              shouldRouteThroughEarpiece: false,
-            });
-          }
-        } catch {
-          // non-fatal — attempt playback regardless
-        }
-        try {
-          try { (player as any).volume = 1.0; } catch { /* volume not settable yet */ }
-          player.seekTo(0);
-          player.play();
-          setIsSpeaking(true);
-        } catch {
-          // non-fatal
-        }
-      })();
+      pendingPlayRef.current = true;
+      console.log(`${VLOG} TTS audio queued for playback:`, audioUri.slice(0, 60));
+      resetAudioModeForPlayback("pre-play").catch(() => {});
     }
-  }, [audioUri, player]);
+  }, [audioUri, player, resetAudioModeForPlayback]);
+
+  // Fire the actual play() call once the player confirms it finished
+  // loading this source. Falls back to a timed warning if loading never
+  // completes and no explicit error was reported either (e.g. a silently
+  // stuck native player) so we still get a visible diagnostic signal.
+  React.useEffect(() => {
+    if (!pendingPlayRef.current) return;
+    if (!playerStatus?.isLoaded) return;
+    pendingPlayRef.current = false;
+    try {
+      try { player.volume = 1.0; } catch { /* volume not settable yet */ }
+      player.seekTo(0).catch((e) => console.warn(`${VLOG} seekTo(0) failed (non-fatal):`, e));
+      player.play();
+      setIsSpeaking(true);
+      console.log(`${VLOG} player.play() called — isLoaded=true, duration=${playerStatus.duration}s`);
+    } catch (e) {
+      console.error(`${VLOG} player.play() threw (frontend playback):`, e);
+      showToast(`Playback failed (frontend): ${String((e as any)?.message || e)}`, "error");
+    }
+  }, [playerStatus?.isLoaded, playerStatus?.duration, player, showToast]);
+
+  // Diagnostic-only: if a TTS file was queued but never starts loading
+  // within a few seconds and expo-audio hasn't reported an error either,
+  // let us know instead of leaving a silent dead end.
+  React.useEffect(() => {
+    if (!audioUri) return;
+    const timer = setTimeout(() => {
+      if (pendingPlayRef.current) {
+        console.warn(`${VLOG} TTS audio still not loaded 6s after queueing (frontend playback stalled)`);
+        showToast("Voice reply is taking unusually long to load.", "error");
+      }
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [audioUri, showToast]);
 
   // Listening rings + waveform driver.
   React.useEffect(() => {
@@ -241,6 +320,7 @@ export default function VoiceScreen() {
       if (!MOCK_WEB) {
         const s = await AudioModule.requestRecordingPermissionsAsync();
         if (!s.granted) {
+          console.warn(`${VLOG} microphone permission denied`);
           setError("Microphone permission denied.");
           setSessionActive(false);
           return;
@@ -248,6 +328,7 @@ export default function VoiceScreen() {
         await AudioModule.setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
         await recorder.prepareToRecordAsync();
         recorder.record();
+        console.log(`${VLOG} recording started`);
       }
       setStage("recording");
       silenceSinceRef.current = null;
@@ -289,11 +370,17 @@ export default function VoiceScreen() {
         // "not initialised" / "already stopped" cases instead of crashing.
         try {
           await recorder.stop();
-        } catch {
-          // ignore — non-fatal
+          console.log(`${VLOG} recorder.stop() ok`);
+        } catch (e) {
+          console.warn(`${VLOG} recorder.stop() error (non-fatal):`, e);
         }
+        // Leave recording mode and route to the speaker as early as possible —
+        // don't wait for the network round-trip below. Re-applied again right
+        // before playback starts in case focus was reclaimed meanwhile.
+        await resetAudioModeForPlayback("post-record");
         const uri = recorder.uri;
         if (!uri) {
+          console.warn(`${VLOG} no recording URI after stop — restarting listen`);
           if (sessionActiveRef.current) start();
           else setStage("idle");
           return;
@@ -306,34 +393,51 @@ export default function VoiceScreen() {
         mime = uri.toLowerCase().endsWith(".m4a") ? "audio/m4a" : "audio/mp4";
       }
 
-      const stt = await api.transcribe({
-        audio_base64: b64,
-        mime_type: mime,
-        language: prefs.from !== "auto" ? prefs.from : undefined,
-        app_locale: prefs.appLang,
-      });
+      let stt;
+      try {
+        stt = await api.transcribe({
+          audio_base64: b64,
+          mime_type: mime,
+          language: prefs.from !== "auto" ? prefs.from : undefined,
+          app_locale: prefs.appLang,
+        });
+      } catch (e: any) {
+        console.error(`${VLOG} /api/transcribe FAILED (backend):`, e);
+        showToast(`Transcription failed (backend): ${e?.message || e}`, "error");
+        throw e;
+      }
       if (typeof (stt as any).credits === "number") await setCredits((stt as any).credits);
       const userText = (stt.text || "").trim();
       if (!userText) {
+        console.log(`${VLOG} transcribe returned empty text — restarting listen`);
         if (sessionActiveRef.current) start();
         else setStage("idle");
         return;
       }
+      console.log(`${VLOG} transcribed:`, userText);
 
       // Conversational turn — Chingu replies in the practice language with the
       // chaotic Pingo persona (configured in src/api/mocks.ts + php-backend).
-      const [chat, pron] = await Promise.all([
-        api.chat({
-          session_id: sessionIdRef.current,
-          message: userText,
-          practice_lang: prefs.to,
-          teach_style: "roast",
-          app_locale: prefs.appLang,
-        }),
-        api.pronounceScore({ text: userText, language: prefs.to, app_locale: prefs.appLang }).catch(() => null),
-      ]);
+      let chat, pron;
+      try {
+        [chat, pron] = await Promise.all([
+          api.chat({
+            session_id: sessionIdRef.current,
+            message: userText,
+            practice_lang: prefs.to,
+            teach_style: "roast",
+            app_locale: prefs.appLang,
+          }),
+          api.pronounceScore({ text: userText, language: prefs.to, app_locale: prefs.appLang }).catch(() => null),
+        ]);
+      } catch (e: any) {
+        console.error(`${VLOG} /api/chat FAILED (backend):`, e);
+        showToast(`Chingu's reply failed (backend): ${e?.message || e}`, "error");
+        throw e;
+      }
       if (typeof (chat as any).credits === "number") await setCredits((chat as any).credits);
       const chinguText = (chat.reply || "").trim();
+      console.log(`${VLOG} chat reply:`, chinguText);
 
       // Record turn into the rolling log (capped at MAX_LOG_TURNS).
       setTurns(prev => {
@@ -358,29 +462,20 @@ export default function VoiceScreen() {
         const chosenVoice = prefs.voiceByLang?.[prefs.to];
         const t = await api.tts({ text: chinguText, target_lang: prefs.to, voice: chosenVoice || undefined, speed: prefs.ttsSpeed || 1.0, app_locale: prefs.appLang });
         if (typeof (t as any).credits === "number") await setCredits((t as any).credits);
+        console.log(`${VLOG} /api/tts ok — mime=${t.mime}, bytes(base64)=${t.audio_base64?.length || 0}`);
         if (Platform.OS === "web") {
           setAudioUri(`data:${t.mime};base64,${t.audio_base64}`);
         } else {
-          // Switch the iOS/Android audio session OUT of record mode and onto the
-          // loud speaker BEFORE the player loads, so the reply is actually audible.
-          try {
-            await AudioModule.setAudioModeAsync({
-              allowsRecording: false,
-              playsInSilentMode: true,
-              shouldPlayInBackground: false,
-              shouldRouteThroughEarpiece: false,
-            });
-          } catch {
-            // non-fatal — playback effect will retry the transition
-          }
           // Native players (iOS/Android) can't reliably play a data: URI — write
           // the mp3 to a cache file and play the file URI instead.
           const fileUri = `${FileSystem.cacheDirectory}chingu-tts-${Date.now()}.mp3`;
           await FileSystem.writeAsStringAsync(fileUri, t.audio_base64, { encoding: "base64" as any });
+          console.log(`${VLOG} TTS written to cache file:`, fileUri);
           setAudioUri(fileUri);
         }
-      } catch {
-        setError("Could not play audio reply.");
+      } catch (e: any) {
+        console.error(`${VLOG} /api/tts FAILED (backend):`, e);
+        showToast(`Voice reply failed (backend TTS): ${e?.message || e}`, "error");
         if (sessionActiveRef.current) setTimeout(() => { if (sessionActiveRef.current) start(); }, 600);
       }
       setStage("done");
@@ -390,7 +485,7 @@ export default function VoiceScreen() {
       setSessionActive(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recorder, prefs.from, prefs.to, prefs.appLang, prefs.ttsSpeed, prefs.voiceByLang]);
+  }, [recorder, prefs.from, prefs.to, prefs.appLang, prefs.ttsSpeed, prefs.voiceByLang, resetAudioModeForPlayback, showToast]);
 
   // Native VAD: while listening with an active session, watch the meter.
   React.useEffect(() => {
@@ -452,6 +547,7 @@ export default function VoiceScreen() {
   React.useEffect(() => {
     return () => {
       clearMockListenTimer();
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       // Safety guard: the web preview never initialises a real MediaRecorder
       // when MOCK_API=1, so calling recorder.stop() on unmount triggers an
       // unhandled rejection from AudioRecorderWeb.stop. Both sync throws AND
@@ -507,6 +603,24 @@ export default function VoiceScreen() {
             </PressableScale>
           </View>
         </View>
+
+        {toast ? (
+          <View
+            key={toast.id}
+            testID="voice-toast"
+            style={[styles.toastBanner, toast.kind === "error" ? styles.toastBannerError : styles.toastBannerInfo]}
+          >
+            <Ionicons
+              name={toast.kind === "error" ? "alert-circle" : "information-circle"}
+              size={16}
+              color="#FFFFFF"
+            />
+            <Text style={styles.toastText} numberOfLines={2}>{toast.message}</Text>
+            <TouchableOpacity testID="voice-toast-dismiss" onPress={() => setToast(null)} hitSlop={8}>
+              <Ionicons name="close" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         <View style={styles.centerArea}>
           <Animated.View
@@ -719,7 +833,26 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "#EFE8FC",
   },
   title: { color: "#1F1A2E", fontSize: 22, fontWeight: "900" },
-  centerArea: { flex: 1, alignItems: "center", justifyContent: "center", position: "relative" },
+  toastBanner: {
+    marginHorizontal: 16,
+    marginTop: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  toastBannerError: { backgroundColor: "#EF4444" },
+  toastBannerInfo: { backgroundColor: "#8B5CF6" },
+  toastText: { flex: 1, color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  // zIndex above the result sheet (which is position:absolute, bottom:0) so
+  // the mascot's tap target stays reachable even when the sheet's bounding
+  // box geometrically overlaps the centered mascot on short screens. A plain
+  // (non-touchable) View doesn't block touches, so this only affects points
+  // that land on an actual touchable inside centerArea (the mascot button) —
+  // taps on the sheet's own empty areas still fall through to it correctly.
+  centerArea: { flex: 1, alignItems: "center", justifyContent: "center", position: "relative", zIndex: 2 },
   sessionGlow: {
     position: "absolute", width: 320, height: 320, borderRadius: 160,
     backgroundColor: "#F3EBFF",
