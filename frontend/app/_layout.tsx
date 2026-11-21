@@ -59,6 +59,12 @@ try {
       return false;
     };
 
+    // Newer expo-font (SDK 58+) exports `loadAsync` via a non-configurable
+    // getter (real ESM live-binding semantics), so this patch can no longer
+    // attach on SDK 58 — the outer try/catch below already handles that by
+    // design, and the independent global unhandled-rejection guard further
+    // down in this file provides the same gray-screen protection without
+    // needing to mutate this module.
     FontMod.loadAsync = async function safeLoadAsync(fontFamilyOrMap: any, source?: any) {
       try {
         // Two shapes:
