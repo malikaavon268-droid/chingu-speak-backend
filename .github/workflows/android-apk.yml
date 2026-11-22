@@ -80,6 +80,7 @@ jobs:
           curl -fL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
           unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
           mkdir -p /tmp/wrap
+          touch /tmp/wrap/settings.gradle
           ( cd /tmp/wrap && "/tmp/gradle-dist/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "${GRADLE_VERSION}" )
           cp /tmp/wrap/gradle/wrapper/gradle-wrapper.jar "$JAR"
           test -s "$JAR"
