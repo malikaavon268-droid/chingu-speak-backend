@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -8,6 +8,7 @@ import * as ImagePicker from "expo-image-picker";
 import LanguageBar from "@/src/components/LanguageBar";
 import { usePrefs, swapLangs, loadPrefs, setUser, setUserAvatar } from "@/src/state/prefs";
 import { getLanguage } from "@/src/constants/languages";
+import { ADMIN_API_AVAILABLE } from "@/src/api/client";
 import { chinguBotAvatar } from "@/src/theme";
 import CreditsPill from "@/src/components/CreditsPill";
 import { useAppLocale } from "@/src/i18n";
@@ -24,7 +25,15 @@ export default function ProfileScreen() {
   const from = getLanguage(prefs.from); const to = getLanguage(prefs.to);
   const onAbout = () => {
     const n = aboutTaps + 1; setAboutTaps(n);
-    if (n >= 7) { setAboutTaps(0); router.push(prefs.adminToken ? "/admin" : "/admin-login"); return; }
+    if (n >= 7) {
+      setAboutTaps(0);
+      if (!ADMIN_API_AVAILABLE) {
+        Alert.alert("Admin unavailable", "The in-app admin panel isn't available on this backend. Use the web admin panel instead.");
+        return;
+      }
+      router.push(prefs.adminToken ? "/admin" : "/admin-login");
+      return;
+    }
     setTimeout(() => setAboutTaps(0), 2000);
   };
   const signedIn = !!prefs.userToken;

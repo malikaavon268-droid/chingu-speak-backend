@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, usePathname } from "expo-router";
 
 import { usePrefs, loadPrefs, setUser, setIsPro } from "@/src/state/prefs";
-import { api } from "@/src/api/client";
+import { api, ADMIN_API_AVAILABLE } from "@/src/api/client";
 import { getAppLang } from "@/src/constants/app-data";
 import { chinguBotAvatar } from "@/src/theme";
 import { useAppLocale } from "@/src/i18n";
@@ -35,6 +35,10 @@ export default function Settings() {
     setAboutTaps(n);
     if (n >= 7) {
       setAboutTaps(0);
+      if (!ADMIN_API_AVAILABLE) {
+        Alert.alert("Admin unavailable", "The in-app admin panel isn't available on this backend. Use the web admin panel instead.");
+        return;
+      }
       router.push(scoped(prefs.adminToken ? "/admin" : "/admin-login") as any);
     }
     setTimeout(() => setAboutTaps(0), 2000);

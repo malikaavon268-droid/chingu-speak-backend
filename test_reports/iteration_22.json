@@ -1,0 +1,60 @@
+{
+  "summary": "Verified the backend-target migration from Emergent FastAPI to the user's external Hostinger PHP+MySQL server. Confirmed .env and GitHub Actions workflow point to the new URL while protected packager vars remain untouched. Confirmed ADMIN_API_AVAILABLE gating correctly suppresses in-app admin navigation on the Hostinger host (no crash, no navigation to /admin*). Direct HTTP checks against the live external Hostinger backend confirm /ping, /public/settings, /chat, /auth/register, /credits/me, /streak/status, /history all return 200; /translate returns 502 with 'Incorrect API key provided' exactly as reported by main agent — this is the external server's own OpenAI key misconfiguration, not an app bug. Did not touch /app/backend at all per instructions. tsc/eslint re-run clean on the 3 changed frontend files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/translate (external Hostinger server)", "issue": "Returns HTTP 502 'LLM provider rejected the request: Incorrect API key provided' — confirmed exactly as described by main agent. This is a misconfigured OpenAI key in the USER'S OWN separate PHP admin panel, outside this app's control. Not a defect of this codebase; /app/backend (untouched, no longer in the request path) is unaffected."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Alert.alert (admin-gating path in profile-screen.tsx / settings/index.tsx)", "issue": "On React-Native-Web, Alert.alert() is a known no-op/unsupported-platform behavior — no visible dialog/text and no browser dialog event fired when triggered via Playwright in the web preview. This is an inherent react-native-web limitation (not introduced by this change) and will show correctly as a native Alert on iOS/Android/Expo Go. The functionally critical part — NOT navigating to /admin or /admin-login when ADMIN_API_AVAILABLE is false — was verified and works correctly on web."}
+    ]
+  },
+  "verification_results": {
+    "env_config": {
+      "frontend/.env EXPO_PUBLIC_BACKEND_URL": "https://linen-wolf-239815.hostingersite.com - CONFIRMED",
+      "frontend/.env EXPO_PACKAGER_PROXY_URL/EXPO_PACKAGER_HOSTNAME": "unchanged, still point to chingu-speak-backend.preview.emergentagent.com - CONFIRMED",
+      ".github/workflows/android-apk.yml EXPO_PUBLIC_BACKEND_URL": "https://linen-wolf-239815.hostingersite.com - CONFIRMED"
+    },
+    "external_backend_connectivity": {
+      "GET /api/ping": "200",
+      "GET /api/public/settings": "200",
+      "POST /api/chat": "200, valid reply returned",
+      "POST /api/auth/register": "200, created TEST_sdet_user_jan2026@example.com, access_token + user returned",
+      "GET /api/credits/me (authed)": "200, credits=50",
+      "GET /api/streak/status (authed)": "200",
+      "GET /api/history (guest, unauthenticated)": "200, returns pre-existing seeded history items (not created by this test run, untouched)",
+      "GET /api/history (authed, new user)": "200, empty items (expected for fresh user)",
+      "POST /api/translate": "502 'Incorrect API key provided' - matches known pre-existing issue on external server, not a code defect"
+    },
+    "admin_gating": {
+      "profile-screen.tsx '#about' x7 taps": "No navigation to /admin or /admin-login; URL stayed at /profile-screen. PASS",
+      "settings/index.tsx 'About' x7 taps": "No navigation to /admin or /admin-login; URL stayed at /settings. PASS",
+      "ADMIN_API_AVAILABLE logic": "/emergentagent\\.com/i.test(BASE_URL) correctly evaluates false for https://linen-wolf-239815.hostingersite.com"
+    },
+    "app_load": "Web preview home screen renders correctly, no red screen, no console errors beyond a pre-existing harmless 'Font.loadAsync patch failed' warning (unrelated to this change, present on every load)",
+    "lint_typecheck": "npx tsc --noEmit: 0 errors in app/profile-screen.tsx, app/settings/index.tsx, src/api/client.ts (pre-existing unrelated errors remain only in app/(tabs)/_layout.tsx, app/voice-screen.tsx, src/components/StartupConsoleOverlay.tsx). npx eslint on the 3 changed files: 0 issues."
+  },
+  "test_report_links": [],
+  "action_items": [
+    "No code changes required for this task — all requested verifications passed.",
+    "Communicate to the user (not an app bug): /api/translate still returns 502 on their Hostinger server due to the OpenAI key configured in their own separate PHP admin panel; /api/chat works via APInex. This must be fixed in their admin panel, not in this codebase.",
+    "Informational only: Alert.alert() does not render visually in the web preview (react-native-web limitation) — verify the 'Admin unavailable' alert visually on a real device/Expo Go build if a visual confirmation is desired; the functional admin-navigation block is confirmed working on web."
+  ],
+  "critical_code_review_comments": [
+    "ADMIN_API_AVAILABLE derivation in client.ts is clean and self-documenting (regex against BASE_URL host), avoids a hardcoded flag, and automatically re-enables admin routing if EXPO_PUBLIC_BACKEND_URL is ever switched back to an emergentagent.com host — good design choice.",
+    "Both profile-screen.tsx and settings/index.tsx implement the identical 7-tap-counter + ADMIN_API_AVAILABLE gate pattern; consider extracting this into a shared hook (e.g., useAdminTapGate) to avoid future drift between the two near-duplicate implementations, though this is a minor DRY nit, not a bug.",
+    "No hardcoded URLs found in the 3 changed files; BASE_URL/API_BASE correctly derive from EXPO_PUBLIC_BACKEND_URL env var only."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% of external-server connectivity checks returned expected results (7/8 endpoints 200, 1/8 known 502 matching reported issue)", "frontend": "100% (admin-gating + app load + lint/typecheck all passed)"},
+  "seed_data_creation": "Created one test user via POST /api/auth/register on the EXTERNAL Hostinger server: TEST_sdet_user_jan2026@example.com (not deleted — no delete-account flow exercised, external server is user-owned and outside this app's data-cleanup scope; flagging for awareness, not cleaned up since /app/backend/DB was never touched).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "This iteration confirms the infra migration (Emergent FastAPI -> user's external Hostinger PHP server) is correctly wired end-to-end on the frontend: env vars, GitHub Actions workflow, and the ADMIN_API_AVAILABLE-based admin-gating all work as designed. /app/backend FastAPI code was not touched, started, or verified in this run (per explicit instruction) — it is no longer in the app's request path. The only non-PASS item is the external server's own /api/translate 502 (bad OpenAI key in their separate admin panel), which was explicitly flagged as known/out-of-scope by the main agent and is reproduced identically here.",
+  "rca_of_issue": "N/A — no new bugs found. The /api/translate 502 RCA (for user communication only): Hostinger PHP server's /api/translate route calls OpenAI directly using a key configured in their own web admin panel; that key is invalid/revoked ('Incorrect API key provided'), while /api/chat uses a different provider (APInex/DeepSeek) with a valid key, hence chat works but translate doesn't. Fix must happen in the user's own Hostinger admin panel, not in this Expo app or the dormant /app/backend FastAPI service."
+}

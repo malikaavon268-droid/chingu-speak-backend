@@ -13,7 +13,7 @@ jobs:
       run:
         working-directory: frontend
     env:
-      EXPO_PUBLIC_BACKEND_URL: "https://chingu-speak-backend.preview.emergentagent.com"
+      EXPO_PUBLIC_BACKEND_URL: "https://linen-wolf-239815.hostingersite.com"
       EXPO_PUBLIC_STARTUP_BYPASS: "false"
       EXPO_PUBLIC_STARTUP_DIAGNOSTICS: "true"
 

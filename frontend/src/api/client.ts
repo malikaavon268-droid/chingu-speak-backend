@@ -15,6 +15,14 @@ const BASE_URL = (RAW_URL || WEB_ORIGIN).replace(/\/$/, "");
 export const API_BASE = `${BASE_URL}/api`;
 export const API_REQUEST_TIMEOUT_MS = 8_000;
 
+// The in-app admin screens (app/admin.tsx, app/admin-login.tsx) only exist
+// against the Emergent-managed FastAPI backend — the Hostinger PHP server
+// has its own separate web admin panel and does not expose /api/admin/*.
+// Gating on the backend host (instead of a hardcoded flag) means switching
+// EXPO_PUBLIC_BACKEND_URL back to the Emergent backend automatically
+// restores in-app admin access too.
+export const ADMIN_API_AVAILABLE = /emergentagent\.com/i.test(BASE_URL);
+
 type TimedRequestInit = RequestInit & { timeoutMs?: number };
 
 async function request<T>(path: string, init: TimedRequestInit = {}): Promise<T> {
