@@ -15,7 +15,7 @@ jobs:
     env:
       EXPO_PUBLIC_BACKEND_URL: "https://linen-wolf-239815.hostingersite.com"
       EXPO_PUBLIC_STARTUP_BYPASS: "false"
-      EXPO_PUBLIC_STARTUP_DIAGNOSTICS: "true"
+      EXPO_PUBLIC_STARTUP_DIAGNOSTICS: "false"
 
     steps:
       - name: Checkout repository
