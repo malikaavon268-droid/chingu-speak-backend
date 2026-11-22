@@ -10,8 +10,7 @@ import { mocks, MOCK_API_ENABLED } from "./mocks";
 import { OperationTimeoutError } from "@/src/utils/timeout";
 
 const RAW_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
-const WEB_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
-const BASE_URL = (RAW_URL || WEB_ORIGIN).replace(/\/$/, "");
+const BASE_URL = (RAW_URL || globalThis.window?.location?.origin || "").replace(/\/$/, "");
 export const API_BASE = `${BASE_URL}/api`;
 export const API_REQUEST_TIMEOUT_MS = 8_000;
 
