@@ -71,7 +71,6 @@ jobs:
             echo "Gradle wrapper jar present ($(wc -c < "$JAR") bytes)"
             exit 0
           fi
-          echo "gradle-wrapper.jar missing — regenerating from official Gradle distribution"
           GRADLE_VERSION=$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-bin\.zip/\1/p' android/gradle/wrapper/gradle-wrapper.properties)
           if [ -z "$GRADLE_VERSION" ]; then
             echo "::error::Could not determine Gradle version from gradle-wrapper.properties"
@@ -80,7 +79,9 @@ jobs:
           echo "Target Gradle version: ${GRADLE_VERSION}"
           curl -fL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
           unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
-          ( cd android && "/tmp/gradle-dist/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "${GRADLE_VERSION}" )
+          mkdir -p /tmp/wrap
+          ( cd /tmp/wrap && "/tmp/gradle-dist/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "${GRADLE_VERSION}" )
+          cp /tmp/wrap/gradle/wrapper/gradle-wrapper.jar "$JAR"
           test -s "$JAR"
           echo "Regenerated wrapper jar ($(wc -c < "$JAR") bytes)"
 
