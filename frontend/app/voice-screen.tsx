@@ -53,7 +53,12 @@ const THINKING_DOTS: { input: number[]; output: number[] }[] = [
 ];
 
 const SILENCE_DBFS = -45;
-const SILENCE_HOLD_MS = 2500;
+const SILENCE_HOLD_MS = 1500;
+// Hard safety net: some devices never report a usable `metering` value (it
+// stays `undefined` forever), so the silence-based auto-stop above can never
+// fire and the session gets stuck on "Listening..." forever. This guarantees
+// forward progress regardless of whether metering works on this device.
+const MAX_RECORD_MS = 8000;
 const MOCK_LISTEN_MS = 1800;
 const MAX_LOG_TURNS = 8;
 const VISIBLE_LOG_TURNS = 3;
@@ -116,6 +121,7 @@ export default function VoiceScreen() {
   const logScrollRef = React.useRef<ScrollView | null>(null);
   const pendingPlayRef = React.useRef(false);
   const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxRecordTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pulseScale = React.useRef(new Animated.Value(1)).current;
   const pulseY = React.useRef(new Animated.Value(0)).current;
@@ -339,6 +345,20 @@ export default function VoiceScreen() {
         mockListenTimerRef.current = setTimeout(() => {
           if (sessionActiveRef.current && stageRef.current === "recording") stop();
         }, MOCK_LISTEN_MS);
+      } else {
+        // Metering-based silence detection (the VAD effect below) never
+        // fires on devices that don't report a usable dBFS value — this
+        // timer guarantees we still stop and process the turn within
+        // MAX_RECORD_MS no matter what, exactly like the text-chat mic's
+        // manual stop button always works regardless of metering.
+        if (maxRecordTimerRef.current) clearTimeout(maxRecordTimerRef.current);
+        maxRecordTimerRef.current = setTimeout(() => {
+          if (sessionActiveRef.current && stageRef.current === "recording" && !autoStoppedRef.current) {
+            console.log(`${VLOG} max record duration (${MAX_RECORD_MS}ms) reached — auto-stopping (metering fallback)`);
+            autoStoppedRef.current = true;
+            stop();
+          }
+        }, MAX_RECORD_MS);
       }
     } catch (e: any) {
       setError(e?.message || "Failed to start voice input.");
@@ -360,6 +380,10 @@ export default function VoiceScreen() {
 
   const stop = React.useCallback(async () => {
     clearMockListenTimer();
+    if (maxRecordTimerRef.current) {
+      clearTimeout(maxRecordTimerRef.current);
+      maxRecordTimerRef.current = null;
+    }
     try {
       setStage("processing");
       let b64 = "";
@@ -380,14 +404,20 @@ export default function VoiceScreen() {
         await resetAudioModeForPlayback("post-record");
         const uri = recorder.uri;
         if (!uri) {
-          console.warn(`${VLOG} no recording URI after stop — restarting listen`);
+          console.warn(`${VLOG} no recording URI after stop (frontend) — restarting listen`);
+          showToast("No audio was captured (frontend) — listening again.", "error");
           if (sessionActiveRef.current) start();
           else setStage("idle");
           return;
         }
         try {
           b64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
+          console.log(`${VLOG} recorded file read ok — base64 length=${b64.length} (uri=${uri.slice(-40)})`);
+          if (b64.length < 2000) {
+            console.warn(`${VLOG} recorded file looks unusually small (${b64.length} base64 chars) — mic may have captured little/no audio`);
+          }
         } catch (e) {
+          console.error(`${VLOG} FileSystem.readAsStringAsync FAILED (frontend):`, e);
           if (process.env.EXPO_PUBLIC_MOCK_API !== "1") throw e;
         }
         mime = uri.toLowerCase().endsWith(".m4a") ? "audio/m4a" : "audio/mp4";
@@ -476,6 +506,10 @@ export default function VoiceScreen() {
       } catch (e: any) {
         console.error(`${VLOG} /api/tts FAILED (backend):`, e);
         showToast(`Voice reply failed (backend TTS): ${e?.message || e}`, "error");
+        // Not falling back to expo-speech here (a different, lower-quality
+        // TTS voice not matching Chingu's persona/voice picker) — the reply
+        // text above is already visible in the log, and the loop still
+        // resumes listening below so the conversation never gets stuck.
         if (sessionActiveRef.current) setTimeout(() => { if (sessionActiveRef.current) start(); }, 600);
       }
       setStage("done");
@@ -488,6 +522,11 @@ export default function VoiceScreen() {
   }, [recorder, prefs.from, prefs.to, prefs.appLang, prefs.ttsSpeed, prefs.voiceByLang, resetAudioModeForPlayback, showToast]);
 
   // Native VAD: while listening with an active session, watch the meter.
+  // This is a nice-to-have early stop (fires sooner, mid-recording) on
+  // devices that report real dBFS metering. On devices where `metering`
+  // never becomes a number (confirmed happens on some hardware), this
+  // effect simply never fires — the hard MAX_RECORD_MS timer set in
+  // start() is what guarantees the turn always completes within ~8s.
   React.useEffect(() => {
     if (MOCK_WEB) return;
     if (!sessionActive || stage !== "recording") {
@@ -517,6 +556,10 @@ export default function VoiceScreen() {
   const endSession = React.useCallback(async () => {
     setSessionActive(false);
     clearMockListenTimer();
+    if (maxRecordTimerRef.current) {
+      clearTimeout(maxRecordTimerRef.current);
+      maxRecordTimerRef.current = null;
+    }
     // Web preview with mocks never wires a real MediaRecorder, so calling
     // recorder.stop() throws "Cannot start an audio recording without
     // initializing a MediaRecorder". Skip the recorder cleanup entirely in
@@ -548,6 +591,7 @@ export default function VoiceScreen() {
     return () => {
       clearMockListenTimer();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (maxRecordTimerRef.current) clearTimeout(maxRecordTimerRef.current);
       // Safety guard: the web preview never initialises a real MediaRecorder
       // when MOCK_API=1, so calling recorder.stop() on unmount triggers an
       // unhandled rejection from AudioRecorderWeb.stop. Both sync throws AND

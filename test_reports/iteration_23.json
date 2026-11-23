@@ -1,0 +1,67 @@
+{
+  "summary": "Verified MAX_RECORD_MS=8000 hard-stop fallback in app/voice-screen.tsx via live web-preview reproduction (same failure mode as user's device: metering never reports a number). Timer fires correctly at 8s, recorder.stop() succeeds, audio mode resets - confirmed via console logs and repeated automated runs. HOWEVER found a real bug: the on-screen voice-toast (testID='voice-toast') is NEVER rendered when the post-stop FileSystem.readAsStringAsync failure occurs (confirmed via repeated DOM polling, toast selector never matched) - contradicting both the explicit requirement that every failure path shows a visible toast, and the main agent's own claim that this exact scenario 'returns to idle with a visible error toast'. Backend regression against the external Hostinger server: 4/4 new pytest checks passed (ping, public/settings, chat round-trip, register+credits+streak+history). chat.tsx confirmed unmodified. tsc --noEmit confirms voice-screen.tsx has only the 2 pre-existing ScrollView-ref errors (no new TS errors).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "voice-screen.tsx stop() - FileSystem.readAsStringAsync failure path",
+        "issue": "When reading the recorded file fails (confirmed reproducible on web via expo-file-system's known web unavailability, but the code path itself is platform-agnostic and would equally swallow ANY other unexpected exception thrown after the recorder.stop() point), the inner catch only does console.error + conditional rethrow (no showToast call). The rethrow is caught by stop()'s outer catch, which only calls setError(message) + setSessionActive(false) - it never calls showToast(). Because setSessionActive(false) flips sessionActive to false while turns.length is still 0, showSheet (= sessionActive || turns.length>0) also becomes false, so even the inline `error` Text inside the result sheet never renders. Net effect: total silent failure on screen - no toast, no error text, no sheet - contradicting the stated requirement that 'EVERY failure path... shows a visible on-screen toast AND is never silently swallowed', and contradicting the main-agent claim that this exact scenario 'returns to idle with a visible error toast'.",
+        "testID": "voice-toast",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "verification_results": {
+    "max_record_ms_fallback": {
+      "code_review": "PASS - maxRecordTimerRef is set in start() (only on the !MOCK_WEB branch), cleared at the very top of stop(), cleared in endSession(), and cleared in the unmount cleanup effect. autoStoppedRef guards against double-fire if metering-VAD and the hard timer race. No leak paths found.",
+      "live_repro": "PASS (run twice) - console sequence confirmed exactly as expected: '[ChinguVoice] recording started' -> (~8.0s later) '[ChinguVoice] max record duration (8000ms) reached — auto-stopping (metering fallback)' -> '[ChinguVoice] recorder.stop() ok' -> '[ChinguVoice] audio mode -> playback/speaker (post-record)'. status-text transitioned Listening -> idle ('Tap Chingu to start the live chat') at ~7.5-8s mark both runs."
+    },
+    "failure_toast_coverage": {
+      "no_recording_uri": "PASS (code read) - showToast('No audio was captured...') called before restart/idle.",
+      "transcribe_failure": "PASS (code read) - showToast('Transcription failed (backend)...') called before rethrow.",
+      "chat_failure": "PASS (code read) - showToast(\"Chingu's reply failed (backend)...\") called before rethrow.",
+      "tts_failure": "PASS (code read) - showToast('Voice reply failed (backend TTS)...') called, session resumes listening.",
+      "filesystem_read_failure": "FAIL (live repro, see ui_bugs) - no showToast call exists on this path; toast never appears on screen across 2 independent runs (polled every 500ms for 10-12s)."
+    },
+    "hostinger_backend_regression": {
+      "GET /api/ping": "200 {status: ok}",
+      "GET /api/public/settings": "200",
+      "POST /api/chat": "200, valid session_id + non-empty reply",
+      "POST /api/auth/register": "200, access_token + user returned (email normalized to lowercase server-side, not a bug)",
+      "GET /api/credits/me (authed)": "200",
+      "GET /api/streak/status (authed)": "200",
+      "GET /api/history (authed, fresh user)": "200, empty items as expected"
+    },
+    "chat_tsx_unmodified": "Confirmed via git log (single auto-commit) and code read - still uses the original SILENCE_HOLD_MS=3000 metering-only VAD with no MAX_RECORD_MS fallback, exactly as the reference implementation; not touched by this change.",
+    "lint_typecheck": {
+      "tsc_noEmit": "voice-screen.tsx: exactly 2 errors, both pre-existing ScrollView.scrollToEnd ref-typing issues (line 311, 763) - no NEW errors introduced. Other unrelated files ((tabs)/_layout.tsx, StartupConsoleOverlay.tsx) have their own pre-existing unrelated errors.",
+      "eslint": "npx eslint app/voice-screen.tsx reports 28 react-hooks/refs errors (experimental rule flagging Animated.Value ref reads during render, e.g. pulseScale/sessionGlow/listeningPulse interpolate() calls and THINKING_DOTS.map ref access). This count matches the pre-existing pattern documented in iteration_21 ('all 28 eslint react-hooks/refs errors are PRE-EXISTING... false positives'). Not a new regression from this change; main agent's 'lint_javascript: 0 issues' likely uses a different/less strict config than raw `npx eslint`."
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hostinger_voice_regression.py",
+    "/app/test_reports/pytest/pytest_results_hostinger_iter23.xml"
+  ],
+  "action_items": [
+    "Fix the FileSystem.readAsStringAsync failure path in voice-screen.tsx's stop(): call showToast(...) explicitly in that inner catch block (or in the outer catch) BEFORE/instead of relying on setError() alone, and ensure showSheet/error-text visibility isn't contingent on sessionActive staying true - otherwise the error text is unreachable the moment setSessionActive(false) fires in the same catch.",
+    "Consider making the outer catch in stop() always call showToast(e?.message || 'Voice processing failed.', 'error') as a final safety net, so ANY exception that reaches that point (not just the ones with their own explicit showToast call) is guaranteed visible - this closes the gap for this known path and any future unexpected exception types.",
+    "No backend code changes needed - all 4 Hostinger regression checks passed; /app/backend FastAPI untouched as instructed."
+  ],
+  "critical_code_review_comments": [
+    "MAX_RECORD_MS timer lifecycle (set/clear in start/stop/endSession/unmount) is correctly implemented with no leak or double-fire risk - this specific piece of the fix is solid.",
+    "The toast-coverage gap is a defense-in-depth issue: 4 of 5 failure paths correctly call showToast before throwing/returning; the 5th (file read) does not, and because the outer catch couples error-visibility to sessionActive (which it flips to false), the gap produces a totally silent failure rather than a degraded one. A single always-show-toast call in the outermost catch would eliminate this class of bug entirely.",
+    "expo-audio / expo-speech policy compliance confirmed by code read - no expo-av or expo-speech imports anywhere in voice-screen.tsx or chat.tsx; the TTS-failure fallback correctly just resumes the listen loop with the text reply already visible, not a different-voice TTS engine."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (4/4 new Hostinger regression checks passed)", "frontend": "Code review + live web-preview repro: MAX_RECORD_MS fallback confirmed working as designed; 1 real toast-coverage bug found and reproduced twice."},
+  "seed_data_creation": "Created one TEST_ user via POST /api/auth/register on the external Hostinger server (TEST_sdet_<uuid>@example.com) for the credits/streak/history checks - test-only, no cleanup endpoint exercised (external server, outside this app's data-cleanup scope).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MAX_RECORD_MS=8000 fallback timer is correctly implemented and verified live (fires at ~8s, stops recorder, resets audio mode, no leak/double-fire). The one real bug found is that the FileSystem.readAsStringAsync failure branch in stop() never calls showToast() and its outer catch's setSessionActive(false) simultaneously hides the result sheet (and therefore the plain error text too), so this specific failure is 100% silent on screen - reproduced twice via DOM polling (voice-toast selector never matched across the whole 10-12s window). This is NOT purely a 'web-only, irrelevant on real phone' issue as characterized in the task brief - the code gap (missing showToast + error-visibility coupled to sessionActive) is platform-agnostic and would equally silently swallow any other exception that reaches that same outer catch without its own explicit showToast call. Hostinger backend regression (ping/settings/chat/register/credits/streak/history) all green. chat.tsx untouched. tsc clean (only the 2 pre-existing ScrollView ref errors remain in voice-screen.tsx)."
+}
